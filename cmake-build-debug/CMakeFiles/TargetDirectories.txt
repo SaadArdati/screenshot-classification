@@ -1,0 +1,3 @@
+/Users/saadardati/CLionProjects/classification_project/cmake-build-debug/CMakeFiles/classification_project.dir
+/Users/saadardati/CLionProjects/classification_project/cmake-build-debug/CMakeFiles/edit_cache.dir
+/Users/saadardati/CLionProjects/classification_project/cmake-build-debug/CMakeFiles/rebuild_cache.dir
