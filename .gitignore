@@ -1,0 +1,107 @@
+# Project-specific directories
+after_processing/
+before_processing/
+split_data/
+
+# Project-specific executable files
+predict
+training
+
+# Model files
+*.bin
+trained_model.bin
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Linker output
+*.ilk
+*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Build directories
+build/
+cmake-build-debug/
+cmake-build-release/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+CMakeScripts/
+Testing/
+Makefile.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+
+# IDE-specific files
+## Visual Studio Code
+.vscode/
+.vs/
+*.code-workspace
+
+## JetBrains (CLion, etc.)
+.idea/
+*.iml
+*.iws
+*.ipr
+*.suo
+*.user
+
+# OS-specific files
+## macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+## Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msm
+*.msp
+*.lnk
+
+## Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
