@@ -1,10 +1,13 @@
 CC = gcc
 CFLAGS = -O2 -lm
 
-all: classifier
+all: training predict
 
-classifier: classifier.c stb_image.h
-	$(CC) $(CFLAGS) -o classifier classifier.c
+training: training.c stb_image.h
+	$(CC) $(CFLAGS) -o training training.c
+
+predict: predict.c stb_image.h
+	$(CC) $(CFLAGS) -o predict predict.c
 
 clean:
-	rm -f classifier
+	rm -f training predict

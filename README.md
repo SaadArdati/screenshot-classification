@@ -31,8 +31,7 @@ cmake ..
 make
 ```
 
-This will compile three executables:
-- `classifier`: For classifying individual images
+This will compile two executables:
 - `training`: For training the model on the dataset
 - `predict`: For using the trained model to classify new images
 

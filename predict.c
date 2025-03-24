@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <dirent.h>
 #include <math.h>
 #define STB_IMAGE_IMPLEMENTATION
@@ -10,7 +9,9 @@
 
 typedef struct {
     float bins[NUM_BINS];
-    int label; // 1 = screenshot, 0 = non-screenshot
+
+     // 1 = screenshot, 0 = non-screenshot
+     int label;
 } Feature;
 
 // Compute normalized grayscale histogram
@@ -48,18 +49,18 @@ int classify_knn(const Feature *train, const int n, const Feature *q) {
         float dist;
         int label;
     } Neighbor;
-    
+
     Neighbor *neighbors = malloc(n * sizeof(Neighbor));
     if (!neighbors) {
         fprintf(stderr, "Memory allocation failed\n");
         return -1;
     }
-    
+
     for (int i = 0; i < n; i++) {
         neighbors[i].dist = euclidean(&train[i], q);
         neighbors[i].label = train[i].label;
     }
-    
+
     // Partial sort: find top K_NEIGHBORS
     for (int i = 0; i < K_NEIGHBORS; i++) {
         for (int j = i + 1; j < n; j++) {
@@ -70,11 +71,11 @@ int classify_knn(const Feature *train, const int n, const Feature *q) {
             }
         }
     }
-    
+
     int votes = 0;
     for (int i = 0; i < K_NEIGHBORS; i++) votes += neighbors[i].label;
-    int result = (votes >= (K_NEIGHBORS / 2 + 1)) ? 1 : 0;
-    
+    const int result = votes >= K_NEIGHBORS / 2 + 1 ? 1 : 0;
+
     free(neighbors);
     return result;
 }
@@ -86,22 +87,22 @@ Feature *load_model(const char *filename, int *size) {
         fprintf(stderr, "Failed to open model file: %s\n", filename);
         return NULL;
     }
-    
+
     // Read dataset size
     if (fread(size, sizeof(int), 1, f) != 1) {
         fprintf(stderr, "Failed to read model size\n");
         fclose(f);
         return NULL;
     }
-    
+
     // Allocate memory for features
-    Feature *model = malloc((*size) * sizeof(Feature));
+    Feature *model = malloc(*size * sizeof(Feature));
     if (!model) {
         fprintf(stderr, "Memory allocation failed\n");
         fclose(f);
         return NULL;
     }
-    
+
     // Read features
     if (fread(model, sizeof(Feature), *size, f) != *size) {
         fprintf(stderr, "Failed to read model data\n");
@@ -109,29 +110,29 @@ Feature *load_model(const char *filename, int *size) {
         fclose(f);
         return NULL;
     }
-    
+
     fclose(f);
     return model;
 }
 
-int main(int argc, char **argv) {
+int main(const int argc, char **argv) {
     if (argc != 3) {
         fprintf(stderr, "Usage: %s <model_file> <image_path>\n", argv[0]);
         return 1;
     }
-    
+
     const char *model_path = argv[1];
     const char *image_path = argv[2];
-    
+
     // Load model
     int model_size;
     Feature *model = load_model(model_path, &model_size);
     if (!model) {
         return 1;
     }
-    
+
     printf("Model loaded with %d training examples\n", model_size);
-    
+
     // Extract features from query image
     Feature query;
     if (extract_feature(image_path, &query) != 0) {
@@ -139,13 +140,13 @@ int main(int argc, char **argv) {
         free(model);
         return 1;
     }
-    
+
     // Classify using KNN
-    int result = classify_knn(model, model_size, &query);
+    const int result = classify_knn(model, model_size, &query);
     printf("Classification result for %s: %s\n", image_path, result ? "SCREENSHOT" : "NON-SCREENSHOT");
-    
+
     // Clean up
     free(model);
-    
+
     return 0;
-} 
+}
