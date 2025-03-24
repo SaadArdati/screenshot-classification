@@ -1,6 +1,8 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <dirent.h>
 #include <math.h>
+#include <time.h>  // For timing measurements
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
@@ -124,9 +126,17 @@ int main(const int argc, char **argv) {
     const char *model_path = argv[1];
     const char *image_path = argv[2];
 
+    // Performance measurement variables
+    clock_t start_time, end_time;
+    double load_model_time = 0.0, feature_extraction_time = 0.0, classification_time = 0.0;
+
     // Load model
     int model_size;
+    start_time = clock();
     Feature *model = load_model(model_path, &model_size);
+    end_time = clock();
+    load_model_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+
     if (!model) {
         return 1;
     }
@@ -135,15 +145,31 @@ int main(const int argc, char **argv) {
 
     // Extract features from query image
     Feature query;
+    start_time = clock();
     if (extract_feature(image_path, &query) != 0) {
         fprintf(stderr, "Failed to extract features from image: %s\n", image_path);
         free(model);
         return 1;
     }
+    end_time = clock();
+    feature_extraction_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
 
     // Classify using KNN
+    start_time = clock();
     const int result = classify_knn(model, model_size, &query);
+    end_time = clock();
+    classification_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+
     printf("Classification result for %s: %s\n", image_path, result ? "SCREENSHOT" : "NON-SCREENSHOT");
+
+    // Print performance metrics
+    printf("\nPerformance Metrics:\n");
+    printf("-------------------\n");
+    printf("Model Loading Time: %.5f seconds\n", load_model_time);
+    printf("Feature Extraction Time: %.5f seconds\n", feature_extraction_time);
+    printf("Classification Time: %.5f seconds\n", classification_time);
+    printf("Total Processing Time: %.5f seconds\n", load_model_time + feature_extraction_time + classification_time);
+    printf("Memory Usage (Model): %.2f MB\n", (float)(model_size * sizeof(Feature)) / (1024 * 1024));
 
     // Clean up
     free(model);
