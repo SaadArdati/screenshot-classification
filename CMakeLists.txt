@@ -1,9 +1,19 @@
 cmake_minimum_required(VERSION 3.18)
 project(screenshot-classification CUDA CXX)
 
-# Set CUDA architecture for Jetson Orin Nano
-set(CMAKE_CUDA_ARCHITECTURES 87)  # Ampere architecture
-set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
+# Detect platform
+if(WIN32)
+    # Windows-specific settings
+    set(CMAKE_CUDA_ARCHITECTURES 75)  # Adjust based on your Windows GPU
+    # Find CUDA installation on Windows
+    if(NOT DEFINED CMAKE_CUDA_COMPILER)
+        set(CMAKE_CUDA_COMPILER "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6/bin/nvcc.exe")
+    endif()
+else()
+    # Jetson Orin Nano settings
+    set(CMAKE_CUDA_ARCHITECTURES 87)  # Ampere architecture
+    set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
+endif()
 
 # Enable C++11
 set(CMAKE_CXX_STANDARD 11)
@@ -42,5 +52,17 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set_target_properties(train_cuda PROPERTIES 
         CUDA_FLAGS "-G"
     )
+endif()
+
+# Print platform-specific information
+message(STATUS "Building for platform: ${CMAKE_SYSTEM_NAME}")
+message(STATUS "CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+message(STATUS "CUDA compiler: ${CMAKE_CUDA_COMPILER}")
+
+# Add platform-specific compile definitions
+if(WIN32)
+    target_compile_definitions(train_cuda PRIVATE WINDOWS_BUILD)
+else()
+    target_compile_definitions(train_cuda PRIVATE JETSON_BUILD)
 endif()
 

@@ -1,3 +1,8 @@
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <dirent.h>
@@ -8,6 +13,17 @@
 #include "common.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+
+// Platform-specific directory handling
+#ifdef _WIN32
+#include <direct.h>
+#define CREATE_DIR(dir) _mkdir(dir)
+#define PATH_SEPARATOR "\\"
+#else
+#include <sys/stat.h>
+#define CREATE_DIR(dir) mkdir(dir, 0777)
+#define PATH_SEPARATOR "/"
+#endif
 
 // Function declarations
 extern "C" void extractFeaturesGPU(const unsigned char* h_images, int batch_size,
@@ -93,7 +109,11 @@ int loadImageBatch(const char* dirpath, int label, unsigned char* batch_buffer,
         if (entry->d_type != DT_REG) continue;
 
         char fullpath[512];
+        #ifdef _WIN32
+        snprintf(fullpath, sizeof(fullpath), "%s%s%s", dirpath, PATH_SEPARATOR, entry->d_name);
+        #else
         snprintf(fullpath, sizeof(fullpath), "%s/%s", dirpath, entry->d_name);
+        #endif
 
         // Load image
         unsigned char* img = stbi_load(fullpath, &width, &height, &channels, 3);
@@ -142,9 +162,20 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaSetDevice(0));
     printDeviceInfo();
 
-    // Path to the split_data directory
-    const char* screenshots_train_dir = "split_data/screenshots_256x256/train";
-    const char* non_screenshots_train_dir = "split_data/non_screenshot_256x256/train";
+    // Path to the split_data directory with platform-specific separators
+    char screenshots_train_dir[512], non_screenshots_train_dir[512];
+    #ifdef _WIN32
+    snprintf(screenshots_train_dir, sizeof(screenshots_train_dir), 
+             "split_data%sscreenshots_256x256%strain", PATH_SEPARATOR, PATH_SEPARATOR);
+    snprintf(non_screenshots_train_dir, sizeof(non_screenshots_train_dir), 
+             "split_data%snon_screenshot_256x256%strain", PATH_SEPARATOR, PATH_SEPARATOR);
+    #else
+    snprintf(screenshots_train_dir, sizeof(screenshots_train_dir), 
+             "split_data/screenshots_256x256/train");
+    snprintf(non_screenshots_train_dir, sizeof(non_screenshots_train_dir), 
+             "split_data/non_screenshot_256x256/train");
+    #endif
+
     const char* model_path = (argc > 1) ? argv[1] : "trained_model.bin";
 
     // Performance measurement variables
