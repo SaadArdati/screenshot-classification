@@ -157,6 +157,7 @@ int main(int argc, char** argv) {
     PerformanceMetrics metrics = {0};
     size_t peak_memory = 0;
     clock_t total_start = clock();
+    double data_loading_time = 0.0;
 
     // Initialize CUDA and print device info
     CUDA_CHECK(cudaSetDevice(0));
@@ -164,16 +165,26 @@ int main(int argc, char** argv) {
 
     // Path to the split_data directory with platform-specific separators
     char screenshots_train_dir[512], non_screenshots_train_dir[512];
+    char screenshots_test_dir[512], non_screenshots_test_dir[512];
+    
     #ifdef _WIN32
     snprintf(screenshots_train_dir, sizeof(screenshots_train_dir), 
              "split_data%sscreenshots_256x256%strain", PATH_SEPARATOR, PATH_SEPARATOR);
     snprintf(non_screenshots_train_dir, sizeof(non_screenshots_train_dir), 
              "split_data%snon_screenshot_256x256%strain", PATH_SEPARATOR, PATH_SEPARATOR);
+    snprintf(screenshots_test_dir, sizeof(screenshots_test_dir), 
+             "split_data%sscreenshots_256x256%stest", PATH_SEPARATOR, PATH_SEPARATOR);
+    snprintf(non_screenshots_test_dir, sizeof(non_screenshots_test_dir), 
+             "split_data%snon_screenshot_256x256%stest", PATH_SEPARATOR, PATH_SEPARATOR);
     #else
     snprintf(screenshots_train_dir, sizeof(screenshots_train_dir), 
              "split_data/screenshots_256x256/train");
     snprintf(non_screenshots_train_dir, sizeof(non_screenshots_train_dir), 
              "split_data/non_screenshot_256x256/train");
+    snprintf(screenshots_test_dir, sizeof(screenshots_test_dir), 
+             "split_data/screenshots_256x256/test");
+    snprintf(non_screenshots_test_dir, sizeof(non_screenshots_test_dir), 
+             "split_data/non_screenshot_256x256/test");
     #endif
 
     const char* model_path = (argc > 1) ? argv[1] : "trained_model.bin";
@@ -187,42 +198,46 @@ int main(int argc, char** argv) {
     // Allocate host memory for batch processing
     const int image_size = 256 * 256 * 3;  // Assuming 256x256 RGB images
     unsigned char* batch_buffer = (unsigned char*)malloc(MAX_BATCH_SIZE * image_size);
-    Feature* all_features = (Feature*)malloc(100000 * sizeof(Feature)); // Adjust size as needed
+    Feature* all_features = (Feature*)malloc(100000 * sizeof(Feature)); // Training features
+    Feature* test_features = (Feature*)malloc(25000 * sizeof(Feature)); // Test features
     
-    if (!batch_buffer || !all_features) {
+    if (!batch_buffer || !all_features || !test_features) {
         fprintf(stderr, "Failed to allocate host memory\n");
         return 1;
     }
 
     int total_processed = 0;
+    int train_size = 0;
+    int test_size = 0;
 
-    // Process screenshots
-    printf("Processing screenshots...\n");
+    // Process training screenshots
+    printf("Processing training screenshots...\n");
     DIR* dir = opendir(screenshots_train_dir);
     if (!dir) {
         fprintf(stderr, "Failed to open directory: %s\n", screenshots_train_dir);
         return 1;
     }
 
+    clock_t load_start = clock();
     while (1) {
         int loaded = loadImageBatch(screenshots_train_dir, 1, batch_buffer,
-                                  all_features, MAX_BATCH_SIZE, &total_processed, dir);
+                                  all_features, MAX_BATCH_SIZE, &train_size, dir);
         if (loaded == 0) break;
 
         // Process batch on GPU
         clock_t batch_start = clock();
-        extractFeaturesGPU(batch_buffer, loaded, 256, 256, 3, all_features + total_processed);
+        extractFeaturesGPU(batch_buffer, loaded, 256, 256, 3, all_features + train_size);
         feature_extraction_time += (double)(clock() - batch_start) / CLOCKS_PER_SEC;
         
-        total_processed += loaded;
-        printf("\rProcessed %d screenshots", total_processed);
+        train_size += loaded;
+        printf("\rProcessed %d training screenshots", train_size);
         fflush(stdout);
     }
     printf("\n");
     closedir(dir);
 
-    // Process non-screenshots
-    printf("Processing non-screenshots...\n");
+    // Process training non-screenshots
+    printf("Processing training non-screenshots...\n");
     dir = opendir(non_screenshots_train_dir);
     if (!dir) {
         fprintf(stderr, "Failed to open directory: %s\n", non_screenshots_train_dir);
@@ -231,49 +246,85 @@ int main(int argc, char** argv) {
 
     while (1) {
         int loaded = loadImageBatch(non_screenshots_train_dir, 0, batch_buffer,
-                                  all_features, MAX_BATCH_SIZE, &total_processed, dir);
+                                  all_features, MAX_BATCH_SIZE, &train_size, dir);
         if (loaded == 0) break;
 
-        // Process batch on GPU
         clock_t batch_start = clock();
-        extractFeaturesGPU(batch_buffer, loaded, 256, 256, 3, all_features + total_processed);
+        extractFeaturesGPU(batch_buffer, loaded, 256, 256, 3, all_features + train_size);
         feature_extraction_time += (double)(clock() - batch_start) / CLOCKS_PER_SEC;
 
-        total_processed += loaded;
-        printf("\rProcessed %d non-screenshots", total_processed);
+        train_size += loaded;
+        printf("\rProcessed %d training non-screenshots", train_size - total_processed);
         fflush(stdout);
     }
     printf("\n");
     closedir(dir);
 
-    // Save model
-    printf("Saving model to %s...\n", model_path);
-    if (saveModel(model_path, all_features, total_processed) != 0) {
-        fprintf(stderr, "Failed to save model\n");
+    // Process test data
+    printf("Processing test data...\n");
+    
+    // Test screenshots
+    dir = opendir(screenshots_test_dir);
+    if (dir) {
+        while (1) {
+            int loaded = loadImageBatch(screenshots_test_dir, 1, batch_buffer,
+                                      test_features, MAX_BATCH_SIZE, &test_size, dir);
+            if (loaded == 0) break;
+            
+            clock_t batch_start = clock();
+            extractFeaturesGPU(batch_buffer, loaded, 256, 256, 3, test_features + test_size);
+            feature_extraction_time += (double)(clock() - batch_start) / CLOCKS_PER_SEC;
+            
+            test_size += loaded;
+            printf("\rProcessed %d test screenshots", test_size);
+            fflush(stdout);
+        }
+        printf("\n");
+        closedir(dir);
     }
 
-    end_time = clock();
-    total_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+    // Test non-screenshots
+    dir = opendir(non_screenshots_test_dir);
+    if (dir) {
+        while (1) {
+            int loaded = loadImageBatch(non_screenshots_test_dir, 0, batch_buffer,
+                                      test_features, MAX_BATCH_SIZE, &test_size, dir);
+            if (loaded == 0) break;
+            
+            clock_t batch_start = clock();
+            extractFeaturesGPU(batch_buffer, loaded, 256, 256, 3, test_features + test_size);
+            feature_extraction_time += (double)(clock() - batch_start) / CLOCKS_PER_SEC;
+            
+            test_size += loaded;
+            printf("\rProcessed %d test non-screenshots", test_size);
+            fflush(stdout);
+        }
+        printf("\n");
+        closedir(dir);
+    }
+    data_loading_time = (double)(clock() - load_start) / CLOCKS_PER_SEC;
 
-    // Print performance metrics
-    printf("\nPerformance Metrics:\n");
-    printf("-------------------\n");
-    printf("Total Processing Time: %.2f seconds\n", total_time);
-    printf("Feature Extraction Time: %.2f seconds\n", feature_extraction_time);
-    printf("Average Time per Image: %.4f seconds\n", feature_extraction_time / total_processed);
-    printf("Total Images Processed: %d\n", total_processed);
-    printf("Throughput: %.2f images/second\n", total_processed / total_time);
+    // Save model
+    printf("Saving model to %s...\n", model_path);
+    if (saveModel(model_path, all_features, train_size) != 0) {
+        fprintf(stderr, "Failed to save model\n");
+    }
 
     // Record peak memory after feature extraction
     peak_memory = max(peak_memory, getCurrentGPUMemory());
 
     // Perform KNN classification on test set
     printf("\nPerforming KNN classification...\n");
-    double knn_times[2];  // [0] = transfer time, [1] = compute time
+    double knn_times[2] = {0};  // [0] = transfer time, [1] = compute time
     int* predictions = (int*)malloc(test_size * sizeof(int));
     
+    if (!predictions) {
+        fprintf(stderr, "Failed to allocate memory for predictions\n");
+        return 1;
+    }
+
     clock_t knn_start = clock();
-    classifyBatchGPU(train_features, train_size, test_features, test_size,
+    classifyBatchGPU(all_features, train_size, test_features, test_size,
                      predictions, knn_times);
     clock_t knn_end = clock();
 
@@ -296,7 +347,7 @@ int main(int argc, char** argv) {
     metrics.knn_compute_time = knn_times[1];
     metrics.total_time = (double)(clock() - total_start) / CLOCKS_PER_SEC;
     metrics.peak_memory_usage = peak_memory;
-    metrics.total_images = total_processed;
+    metrics.total_images = train_size + test_size;
 
     // Print detailed performance metrics
     printPerformanceMetrics(&metrics);
@@ -305,6 +356,7 @@ int main(int argc, char** argv) {
     free(batch_buffer);
     free(predictions);
     free(all_features);
+    free(test_features);
 
     return 0;
 } 
