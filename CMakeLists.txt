@@ -1,14 +1,40 @@
-cmake_minimum_required(VERSION 3.30)
-project(image_classification C)
+cmake_minimum_required(VERSION 3.18)
+project(screenshot-classification CUDA CXX)
 
-set(CMAKE_C_STANDARD 11)
+# Set CUDA architecture for Jetson Orin Nano
+set(CMAKE_CUDA_ARCHITECTURES 87)  # Ampere architecture
+set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
 
-add_executable(training training.c
-        stb_image.h)
+# Enable C++11
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CUDA_STANDARD 11)
 
-add_executable(predict predict.c
-        stb_image.h)
+# Find required packages
+find_package(CUDA REQUIRED)
 
-target_link_libraries(training m)
-target_link_libraries(predict m)
+# Include directories
+include_directories(${CMAKE_SOURCE_DIR}/include)
+include_directories(${CUDA_INCLUDE_DIRS})
+
+# Add executable
+add_executable(train_cuda
+    src/main.cu
+    src/feature_extraction.cu
+    src/knn.cu
+)
+
+# Link CUDA libraries
+target_link_libraries(train_cuda ${CUDA_LIBRARIES})
+
+# Set CUDA specific flags
+set_target_properties(train_cuda PROPERTIES
+    CUDA_SEPARABLE_COMPILATION ON
+)
+
+# Enable debug symbols in CUDA code
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set_target_properties(train_cuda PROPERTIES 
+        CUDA_FLAGS "-G"
+    )
+endif()
 
