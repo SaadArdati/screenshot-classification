@@ -16,12 +16,15 @@ find_package(CUDA REQUIRED)
 include_directories(${CMAKE_SOURCE_DIR}/include)
 include_directories(${CUDA_INCLUDE_DIRS})
 
-# Add executable
-add_executable(train_cuda
+# Add source files
+set(SOURCES
     src/main.cu
     src/feature_extraction.cu
     src/knn.cu
 )
+
+# Add executable
+add_executable(train_cuda ${SOURCES})
 
 # Link CUDA libraries
 target_link_libraries(train_cuda ${CUDA_LIBRARIES})
@@ -30,6 +33,9 @@ target_link_libraries(train_cuda ${CUDA_LIBRARIES})
 set_target_properties(train_cuda PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
 )
+
+# Create include directory if it doesn't exist
+file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/include)
 
 # Enable debug symbols in CUDA code
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
