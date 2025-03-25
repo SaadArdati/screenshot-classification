@@ -13,8 +13,23 @@
 extern "C" void extractFeaturesGPU(const unsigned char* h_images, int batch_size,
                                  int width, int height, int channels,
                                  Feature* h_features);
+extern "C" void classifyBatchGPU(const Feature* train_features, int train_size,
+                               const Feature* query_features, int query_size,
+                               int* predictions, double* computation_times);
 
-// Print device information
+// Performance monitoring structure
+typedef struct {
+    double data_loading_time;
+    double feature_extraction_time;
+    double knn_transfer_time;
+    double knn_compute_time;
+    double total_time;
+    size_t peak_memory_usage;
+    int total_images;
+    float accuracy;
+} PerformanceMetrics;
+
+// Print device information with power limits
 void printDeviceInfo() {
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
@@ -29,7 +44,41 @@ void printDeviceInfo() {
     printf("Total Global Memory: %.2f GB\n", 
            (float)prop.totalGlobalMem / (1024.0f * 1024.0f * 1024.0f));
     printf("Shared Memory per Block: %zu KB\n", prop.sharedMemPerBlock / 1024);
+    printf("L2 Cache Size: %d KB\n", prop.l2CacheSize / 1024);
+    printf("Max Threads per MultiProcessor: %d\n", prop.maxThreadsPerMultiProcessor);
+    printf("Memory Clock Rate: %.2f GHz\n", prop.memoryClockRate * 1e-6);
+    printf("Memory Bus Width: %d bits\n", prop.memoryBusWidth);
     printf("\n");
+}
+
+// Get current GPU memory usage
+size_t getCurrentGPUMemory() {
+    size_t free_mem, total_mem;
+    CUDA_CHECK(cudaMemGetInfo(&free_mem, &total_mem));
+    return total_mem - free_mem;
+}
+
+// Print performance metrics
+void printPerformanceMetrics(const PerformanceMetrics* metrics) {
+    printf("\nDetailed Performance Metrics:\n");
+    printf("---------------------------\n");
+    printf("Data Loading Time: %.2f seconds\n", metrics->data_loading_time);
+    printf("Feature Extraction Time: %.2f seconds\n", metrics->feature_extraction_time);
+    printf("KNN Data Transfer Time: %.2f seconds\n", metrics->knn_transfer_time);
+    printf("KNN Computation Time: %.2f seconds\n", metrics->knn_compute_time);
+    printf("Total Processing Time: %.2f seconds\n", metrics->total_time);
+    printf("Peak GPU Memory Usage: %.2f MB\n", metrics->peak_memory_usage / (1024.0f * 1024.0f));
+    printf("Total Images Processed: %d\n", metrics->total_images);
+    printf("Processing Speed: %.2f images/second\n", 
+           metrics->total_images / metrics->total_time);
+    printf("Classification Accuracy: %.2f%%\n", metrics->accuracy * 100);
+    printf("\nPer-Phase Performance:\n");
+    printf("Data Loading: %.1f%%\n", 
+           (metrics->data_loading_time / metrics->total_time) * 100);
+    printf("Feature Extraction: %.1f%%\n",
+           (metrics->feature_extraction_time / metrics->total_time) * 100);
+    printf("KNN Classification: %.1f%%\n",
+           ((metrics->knn_transfer_time + metrics->knn_compute_time) / metrics->total_time) * 100);
 }
 
 // Load images in batches
@@ -83,8 +132,13 @@ int saveModel(const char* filename, Feature* features, int total_features) {
     return 0;
 }
 
+// Update the main function to include KNN classification and performance monitoring
 int main(int argc, char** argv) {
-    // Initialize CUDA
+    PerformanceMetrics metrics = {0};
+    size_t peak_memory = 0;
+    clock_t total_start = clock();
+
+    // Initialize CUDA and print device info
     CUDA_CHECK(cudaSetDevice(0));
     printDeviceInfo();
 
@@ -179,8 +233,46 @@ int main(int argc, char** argv) {
     printf("Total Images Processed: %d\n", total_processed);
     printf("Throughput: %.2f images/second\n", total_processed / total_time);
 
+    // Record peak memory after feature extraction
+    peak_memory = max(peak_memory, getCurrentGPUMemory());
+
+    // Perform KNN classification on test set
+    printf("\nPerforming KNN classification...\n");
+    double knn_times[2];  // [0] = transfer time, [1] = compute time
+    int* predictions = (int*)malloc(test_size * sizeof(int));
+    
+    clock_t knn_start = clock();
+    classifyBatchGPU(train_features, train_size, test_features, test_size,
+                     predictions, knn_times);
+    clock_t knn_end = clock();
+
+    // Record peak memory after KNN
+    peak_memory = max(peak_memory, getCurrentGPUMemory());
+
+    // Calculate accuracy
+    int correct = 0;
+    for (int i = 0; i < test_size; i++) {
+        if (predictions[i] == test_features[i].label) {
+            correct++;
+        }
+    }
+    metrics.accuracy = (float)correct / test_size;
+
+    // Update performance metrics
+    metrics.data_loading_time = data_loading_time;
+    metrics.feature_extraction_time = feature_extraction_time;
+    metrics.knn_transfer_time = knn_times[0];
+    metrics.knn_compute_time = knn_times[1];
+    metrics.total_time = (double)(clock() - total_start) / CLOCKS_PER_SEC;
+    metrics.peak_memory_usage = peak_memory;
+    metrics.total_images = total_processed;
+
+    // Print detailed performance metrics
+    printPerformanceMetrics(&metrics);
+
     // Clean up
     free(batch_buffer);
+    free(predictions);
     free(all_features);
 
     return 0;
