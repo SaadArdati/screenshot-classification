@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <dirent.h>
 #include <string.h>
+#include <time.h>
 #include <cuda_runtime.h>
 #include "cuda_utils.cuh"
 #include "common.h"
@@ -64,6 +65,24 @@ int loadImageBatch(const char* dirpath, int label, unsigned char* batch_buffer,
     return loaded;
 }
 
+// Save model to file
+int saveModel(const char* filename, Feature* features, int total_features) {
+    FILE* f = fopen(filename, "wb");
+    if (!f) {
+        fprintf(stderr, "Failed to open file for writing: %s\n", filename);
+        return -1;
+    }
+
+    // Write number of features
+    fwrite(&total_features, sizeof(int), 1, f);
+    
+    // Write features
+    fwrite(features, sizeof(Feature), total_features, f);
+    
+    fclose(f);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     // Initialize CUDA
     CUDA_CHECK(cudaSetDevice(0));
@@ -74,41 +93,95 @@ int main(int argc, char** argv) {
     const char* non_screenshots_train_dir = "split_data/non_screenshot_256x256/train";
     const char* model_path = (argc > 1) ? argv[1] : "trained_model.bin";
 
+    // Performance measurement variables
+    clock_t start_time, end_time;
+    double total_time = 0.0, feature_extraction_time = 0.0;
+
+    start_time = clock();
+
     // Allocate host memory for batch processing
     const int image_size = 256 * 256 * 3;  // Assuming 256x256 RGB images
     unsigned char* batch_buffer = (unsigned char*)malloc(MAX_BATCH_SIZE * image_size);
-    Feature* features = (Feature*)malloc(MAX_BATCH_SIZE * sizeof(Feature));
-
-    if (!batch_buffer || !features) {
+    Feature* all_features = (Feature*)malloc(100000 * sizeof(Feature)); // Adjust size as needed
+    
+    if (!batch_buffer || !all_features) {
         fprintf(stderr, "Failed to allocate host memory\n");
         return 1;
     }
 
+    int total_processed = 0;
+
     // Process screenshots
+    printf("Processing screenshots...\n");
     DIR* dir = opendir(screenshots_train_dir);
     if (!dir) {
         fprintf(stderr, "Failed to open directory: %s\n", screenshots_train_dir);
         return 1;
     }
 
-    int total_processed = 0;
     while (1) {
         int loaded = loadImageBatch(screenshots_train_dir, 1, batch_buffer,
-                                  features, MAX_BATCH_SIZE, &total_processed, dir);
+                                  all_features, MAX_BATCH_SIZE, &total_processed, dir);
         if (loaded == 0) break;
 
         // Process batch on GPU
-        extractFeaturesGPU(batch_buffer, loaded, 256, 256, 3, features + total_processed);
+        clock_t batch_start = clock();
+        extractFeaturesGPU(batch_buffer, loaded, 256, 256, 3, all_features + total_processed);
+        feature_extraction_time += (double)(clock() - batch_start) / CLOCKS_PER_SEC;
+        
         total_processed += loaded;
+        printf("\rProcessed %d screenshots", total_processed);
+        fflush(stdout);
     }
+    printf("\n");
     closedir(dir);
 
-    // Process non-screenshots (similar to screenshots)
-    // ... (similar code for non-screenshots)
+    // Process non-screenshots
+    printf("Processing non-screenshots...\n");
+    dir = opendir(non_screenshots_train_dir);
+    if (!dir) {
+        fprintf(stderr, "Failed to open directory: %s\n", non_screenshots_train_dir);
+        return 1;
+    }
+
+    while (1) {
+        int loaded = loadImageBatch(non_screenshots_train_dir, 0, batch_buffer,
+                                  all_features, MAX_BATCH_SIZE, &total_processed, dir);
+        if (loaded == 0) break;
+
+        // Process batch on GPU
+        clock_t batch_start = clock();
+        extractFeaturesGPU(batch_buffer, loaded, 256, 256, 3, all_features + total_processed);
+        feature_extraction_time += (double)(clock() - batch_start) / CLOCKS_PER_SEC;
+
+        total_processed += loaded;
+        printf("\rProcessed %d non-screenshots", total_processed);
+        fflush(stdout);
+    }
+    printf("\n");
+    closedir(dir);
+
+    // Save model
+    printf("Saving model to %s...\n", model_path);
+    if (saveModel(model_path, all_features, total_processed) != 0) {
+        fprintf(stderr, "Failed to save model\n");
+    }
+
+    end_time = clock();
+    total_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+
+    // Print performance metrics
+    printf("\nPerformance Metrics:\n");
+    printf("-------------------\n");
+    printf("Total Processing Time: %.2f seconds\n", total_time);
+    printf("Feature Extraction Time: %.2f seconds\n", feature_extraction_time);
+    printf("Average Time per Image: %.4f seconds\n", feature_extraction_time / total_processed);
+    printf("Total Images Processed: %d\n", total_processed);
+    printf("Throughput: %.2f images/second\n", total_processed / total_time);
 
     // Clean up
     free(batch_buffer);
-    free(features);
+    free(all_features);
 
     return 0;
 } 

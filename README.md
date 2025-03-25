@@ -1,127 +1,135 @@
-# Screenshot Classification
+# Screenshot Classification with CUDA
 
-A machine learning-based image classifier that can identify whether an image is a screenshot or a regular photograph.
+A CUDA-accelerated implementation of screenshot classification using K-nearest neighbors (KNN) and grayscale histogram features.
 
-## Overview
+## Hardware Requirements
 
-This project implements a K-nearest neighbors (KNN) classification algorithm to distinguish between screenshots and non-screenshots using grayscale histogram features extracted from images.
+- NVIDIA Jetson Orin Nano Developer Kit
+- Minimum 8GB RAM
+- Storage space for dataset
 
-## Requirements
+## Software Requirements
 
-- C compiler (gcc recommended)
-- make or CMake
-- Image dataset split into screenshots and non-screenshots
+1. JetPack SDK 6.0 or later
+2. CUDA Toolkit (included in JetPack)
+3. CMake 3.18 or later
+4. GCC/G++ compiler
 
-## Installation
+## Setup Instructions for Jetson Orin Nano
 
-Clone the repository and build the project using one of the following methods:
+1. **Install Required Packages**:
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y cmake build-essential
+   ```
 
-### Using Make
+2. **Clone the Repository**:
+   ```bash
+   git clone [repository-url]
+   cd screenshot-classification
+   ```
 
-```bash
-make all
+3. **Prepare Dataset**:
+   Create the following directory structure:
+   ```
+   split_data/
+   ├── screenshots_256x256/
+   │   ├── train/
+   │   │   └── [screenshot images]
+   │   └── test/
+   │       └── [screenshot images]
+   └── non_screenshot_256x256/
+       ├── train/
+       │   └── [non-screenshot images]
+       └── test/
+           └── [non-screenshot images]
+   ```
+   
+   Note: All images should be 256x256 pixels in RGB format.
+
+4. **Build the Project**:
+   ```bash
+   mkdir build
+   cd build
+   cmake ..
+   make -j4
+   ```
+
+## Running the Code
+
+1. **Training**:
+   ```bash
+   ./train_cuda [optional: output_model_path]
+   ```
+   Default model path is `trained_model.bin`
+
+2. **Monitor Performance**:
+   - The program will display real-time processing statistics
+   - GPU utilization can be monitored using:
+     ```bash
+     watch -n 0.5 nvidia-smi
+     ```
+
+## Performance Optimization
+
+The code is optimized for the Jetson Orin Nano with:
+- Batch processing (32 images per batch)
+- Shared memory usage for histogram computation
+- Efficient memory transfers
+- Parallel histogram computation
+
+Typical performance metrics on Jetson Orin Nano:
+- Processing Speed: ~XXX images/second
+- Memory Usage: ~XXX MB
+- GPU Utilization: ~XX%
+
+## Troubleshooting
+
+1. **Out of Memory Errors**:
+   - Reduce `MAX_BATCH_SIZE` in `include/common.h`
+   - Close other GPU-intensive applications
+
+2. **Performance Issues**:
+   - Ensure proper cooling for the Jetson
+   - Monitor thermal throttling using:
+     ```bash
+     watch -n 0.5 cat /sys/devices/virtual/thermal/thermal_zone*/temp
+     ```
+
+3. **Build Errors**:
+   - Ensure CUDA toolkit is properly installed:
+     ```bash
+     nvcc --version
+     ```
+   - Check CMake version:
+     ```bash
+     cmake --version
+     ```
+
+## Project Structure
+
+```
+screenshot-classification/
+├── CMakeLists.txt          # Build configuration
+├── include/
+│   ├── cuda_utils.cuh      # CUDA utility functions
+│   └── common.h           # Shared definitions
+├── src/
+│   ├── main.cu            # Main program
+│   ├── feature_extraction.cu  # CUDA feature extraction
+│   └── knn.cu             # CUDA KNN implementation
+└── README.md
 ```
 
-### Using CMake
+## Performance Comparison
 
-```bash
-mkdir -p cmake-build-debug
-cd cmake-build-debug
-cmake ..
-make
-```
+| Metric              | CPU Version | GPU Version |
+|---------------------|-------------|-------------|
+| Processing Speed    | X img/s     | Y img/s     |
+| Memory Usage        | X MB        | Y MB        |
+| Training Time       | X seconds   | Y seconds   |
+| Power Consumption   | X W         | Y W         |
 
-This will compile two executables:
-- `training`: For training the model on the dataset
-- `predict`: For using the trained model to classify new images
+## Contributing
 
-## Data Structure
-
-The project expects data to be organized as follows:
-
-```
-split_data/
-├── screenshots_256x256/
-│   ├── train/
-│   │   └── [screenshot images]
-│   └── test/
-│       └── [screenshot images]
-└── non_screenshot_256x256/
-    ├── train/
-    │   └── [non-screenshot images]
-    └── test/
-        └── [non-screenshot images]
-```
-
-## Training the Model
-
-To train the model on your dataset:
-
-```bash
-./training
-```
-
-This will:
-1. Load all training images from both screenshot and non-screenshot directories
-2. Extract grayscale histogram features from each image
-3. Train a K-Nearest Neighbors model (with K=3)
-4. Evaluate the model on the test set
-5. Output the accuracy
-6. Save the trained model to `trained_model.bin`
-
-You can also specify a custom output path for the model:
-
-```bash
-./training my_custom_model.bin
-```
-
-## Using the Model to Classify Images
-
-Once you have a trained model, you can classify new images using:
-
-```bash
-./predict trained_model.bin path/to/your/image.jpg
-```
-
-The program will output whether the image is classified as a SCREENSHOT or NON-SCREENSHOT.
-
-### Examples
-
-Classify a screenshot:
-```bash
-./predict trained_model.bin split_data/screenshots_256x256/test/GAME_530.jpg
-```
-
-Classify a regular photograph:
-```bash
-./predict trained_model.bin split_data/non_screenshot_256x256/test/photo-1634291934402-7968f44a2939.jpg
-```
-
-## Technical Details
-
-### Feature Extraction
-- Images are converted to grayscale
-- A histogram with 16 bins is computed
-- Histogram is normalized by the total number of pixels
-
-### Classification Algorithm
-- K-Nearest Neighbors (K=3)
-- Euclidean distance metric
-- Majority vote for final classification
-
-### Model File Format
-The model is saved as a binary file containing:
-- Number of training examples (integer)
-- Array of Feature structures, each containing:
-  - 16-bin histogram (float array)
-  - Label (1 for screenshot, 0 for non-screenshot)
-
-## Performance
-
-On the test set, the model achieves approximately 93.69% accuracy, demonstrating that grayscale histogram features are effective for distinguishing between screenshots and regular photographs.
-
-## Limitations
-
-- The model only considers grayscale information
-- Performance may vary with different types of screenshots or photographs
-- The current implementation loads all training data into memory, which may be limiting for very large datasets 
+Feel free to submit issues and enhancement requests! 
