@@ -22,6 +22,20 @@ set(CMAKE_CUDA_STANDARD 11)
 # Find required packages
 find_package(CUDA REQUIRED)
 
+# Create necessary directories
+file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/include)
+file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/src)
+file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/lib)
+
+# Download stb_image.h if it doesn't exist
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/include/stb_image.h")
+    file(DOWNLOAD
+        "https://raw.githubusercontent.com/nothings/stb/master/stb_image.h"
+        "${CMAKE_SOURCE_DIR}/include/stb_image.h"
+        SHOW_PROGRESS
+    )
+endif()
+
 # Include directories
 include_directories(${CMAKE_SOURCE_DIR}/include)
 include_directories(${CUDA_INCLUDE_DIRS})
@@ -44,9 +58,6 @@ set_target_properties(train_cuda PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
 )
 
-# Create include directory if it doesn't exist
-file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/include)
-
 # Enable debug symbols in CUDA code
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set_target_properties(train_cuda PROPERTIES 
@@ -65,4 +76,10 @@ if(WIN32)
 else()
     target_compile_definitions(train_cuda PRIVATE JETSON_BUILD)
 endif()
+
+# Print project structure information
+message(STATUS "Project structure setup:")
+message(STATUS "  Include directory: ${CMAKE_SOURCE_DIR}/include")
+message(STATUS "  Source directory: ${CMAKE_SOURCE_DIR}/src")
+message(STATUS "  Library directory: ${CMAKE_SOURCE_DIR}/lib")
 
