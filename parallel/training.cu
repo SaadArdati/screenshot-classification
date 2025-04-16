@@ -428,14 +428,14 @@ int main(int argc, char** argv) {
     snprintf(model_path, sizeof(model_path), "%s%s%s", cwd, PATH_SEPARATOR, "trained_model.bin");
     #else
     snprintf(screenshots_train_dir, sizeof(screenshots_train_dir), 
-             "%s/../split_data/screenshots_256x256/train", cwd);
+             "%s/split_data/screenshots_256x256/train", cwd);
     snprintf(non_screenshots_train_dir, sizeof(non_screenshots_train_dir), 
-             "%s/../split_data/non_screenshot_256x256/train", cwd);
+             "%s/split_data/non_screenshot_256x256/train", cwd);
     snprintf(screenshots_test_dir, sizeof(screenshots_test_dir), 
-             "%s/../split_data/screenshots_256x256/test", cwd);
+             "%s/split_data/screenshots_256x256/test", cwd);
     snprintf(non_screenshots_test_dir, sizeof(non_screenshots_test_dir), 
-             "%s/../split_data/non_screenshot_256x256/test", cwd);
-    snprintf(model_path, sizeof(model_path), "%s/../trained_model.bin", cwd);
+             "%s/split_data/non_screenshot_256x256/test", cwd);
+    snprintf(model_path, sizeof(model_path), "%s/trained_model.bin", cwd);
     #endif
     
     printf("Using directories:\n");

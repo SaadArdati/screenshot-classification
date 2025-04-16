@@ -227,8 +227,8 @@ def prepare_sample_data():
     print("Setting up sample test data...")
     
     # Create sample data directories
-    run_cmd("mkdir -p data/screenshots/train data/screenshots/test")
-    run_cmd("mkdir -p data/non_screenshots/train data/non_screenshots/test")
+    run_cmd("mkdir -p split_data/screenshots_256x256/train split_data/screenshots_256x256/test")
+    run_cmd("mkdir -p split_data/non_screenshot_256x256/train split_data/non_screenshot_256x256/test")
     
     # Check if uploaded images exist
     screenshot_exists = os.path.exists("screenshot.jpeg")
@@ -247,15 +247,15 @@ def prepare_sample_data():
     
     # Copy files to appropriate directories
     if screenshot_exists:
-        run_cmd("cp screenshot.jpeg data/screenshots/train/screenshot.jpeg")
-        run_cmd("cp screenshot.jpeg data/screenshots/test/screenshot.jpeg")
+        run_cmd("cp screenshot.jpeg split_data/screenshots_256x256/train/screenshot.jpeg")
+        run_cmd("cp screenshot.jpeg split_data/screenshots_256x256/test/screenshot.jpeg")
         print("Screenshot image added to dataset")
     else:
         print("Screenshot image not found, benchmarking may fail")
     
     if nonscreenshot_exists:
-        run_cmd("cp nonscreenshot.png data/non_screenshots/train/nonscreenshot.png")
-        run_cmd("cp nonscreenshot.png data/non_screenshots/test/nonscreenshot.png")
+        run_cmd("cp nonscreenshot.png split_data/non_screenshot_256x256/train/nonscreenshot.png")
+        run_cmd("cp nonscreenshot.png split_data/non_screenshot_256x256/test/nonscreenshot.png")
         print("Non-screenshot image added to dataset")
     else:
         print("Non-screenshot image not found, benchmarking may fail")
@@ -318,28 +318,49 @@ def benchmark():
         # Parse output for metrics
         try:
             for line in stdout.splitlines():
-                if "Total Processing Time" in line:
-                    metrics['sequential']['train_time'] = float(line.split()[-1])
-                elif "Data Loading Time" in line:
-                    metrics['sequential']['loading_time'] = float(line.split()[-1])
-                elif "Memory Usage" in line:
-                    metrics['sequential']['train_memory'] = float(line.split()[-2])
-                elif "Accuracy" in line:
-                    metrics['sequential']['accuracy'] = float(line.split()[-2])
-                elif "Number of training examples" in line:
-                    examples = int(line.split()[-1])
-                    if metrics['sequential']['train_time'] > 0:
-                        metrics['sequential']['images_per_sec'] = examples / metrics['sequential']['train_time']
+                if "Total Processing Time:" in line or "Total Processing Time" in line:
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if part.replace('.', '', 1).isdigit():
+                            metrics['sequential']['train_time'] = float(part)
+                            break
+                elif "Data Loading Time:" in line or "Data Loading Time" in line:
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if part.replace('.', '', 1).isdigit():
+                            metrics['sequential']['loading_time'] = float(part)
+                            break
+                elif "Memory Usage:" in line or "Memory Usage" in line:
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if part.replace('.', '', 1).isdigit():
+                            metrics['sequential']['train_memory'] = float(part)
+                            break
+                elif "Classification Accuracy:" in line or "Classification Accuracy" in line:
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if part.replace('.', '', 1).isdigit():
+                            metrics['sequential']['accuracy'] = float(part)
+                            break
+                elif "Number of Training Examples:" in line or "Number of Training Examples" in line:
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if part.isdigit():
+                            examples = int(part)
+                            if metrics['sequential']['train_time'] > 0:
+                                metrics['sequential']['images_per_sec'] = examples / metrics['sequential']['train_time']
+                            break
         except Exception as e:
             print(f"Error parsing sequential training metrics: {e}")
     else:
         print(f"Sequential training failed with code {code}")
+        print(f"Training stderr: {stderr}")
         sys.exit(1)
     
     # Run sequential prediction benchmark
     print("\nRunning sequential prediction...")
     # Find a test image
-    screenshot_img = next(iter(glob.glob("data/screenshots/test/*.*")), None)
+    screenshot_img = next(iter(glob.glob("split_data/screenshots_256x256/test/*.*")), None)
     
     if screenshot_img:
         stdout, stderr, code = run_cmd(f"./build/bin/predict_seq model_sequential.bin \"{screenshot_img}\"", capture_output=True)
@@ -347,18 +368,35 @@ def benchmark():
         if code == 0:
             try:
                 for line in stdout.splitlines():
-                    if "Total Processing Time" in line:
-                        metrics['sequential']['predict_time'] = float(line.split()[-1])
-                    elif "Feature Extraction Time" in line:
-                        metrics['sequential']['feature_time'] = float(line.split()[-1])
-                    elif "Classification Time" in line:
-                        metrics['sequential']['knn_time'] = float(line.split()[-1])
-                    elif "Memory Usage" in line:
-                        metrics['sequential']['predict_memory'] = float(line.split()[-2])
+                    if "Total Processing Time:" in line or "Total Processing Time" in line:
+                        parts = line.split()
+                        for i, part in enumerate(parts):
+                            if part.replace('.', '', 1).isdigit():
+                                metrics['sequential']['predict_time'] = float(part)
+                                break
+                    elif "Feature Extraction Time:" in line or "Feature Extraction Time" in line:
+                        parts = line.split()
+                        for i, part in enumerate(parts):
+                            if part.replace('.', '', 1).isdigit():
+                                metrics['sequential']['feature_time'] = float(part)
+                                break
+                    elif "Classification Time:" in line or "Classification Time" in line:
+                        parts = line.split()
+                        for i, part in enumerate(parts):
+                            if part.replace('.', '', 1).isdigit():
+                                metrics['sequential']['knn_time'] = float(part)
+                                break
+                    elif "Memory Usage:" in line or "Memory Usage" in line:
+                        parts = line.split()
+                        for i, part in enumerate(parts):
+                            if part.replace('.', '', 1).isdigit():
+                                metrics['sequential']['predict_memory'] = float(part)
+                                break
             except Exception as e:
                 print(f"Error parsing sequential prediction metrics: {e}")
         else:
             print(f"Sequential prediction failed with code {code}")
+            print(f"Prediction stderr: {stderr}")
             sys.exit(1)
     else:
         print("No test image found for prediction benchmark")
@@ -373,22 +411,43 @@ def benchmark():
         # Parse output for metrics
         try:
             for line in stdout.splitlines():
-                if "Total Processing Time" in line:
-                    metrics['parallel']['train_time'] = float(line.split()[-1])
-                elif "Data Loading Time" in line:
-                    metrics['parallel']['loading_time'] = float(line.split()[-1])
-                elif "Memory Usage" in line:
-                    metrics['parallel']['train_memory'] = float(line.split()[-2])
-                elif "Accuracy" in line:
-                    metrics['parallel']['accuracy'] = float(line.split()[-2])
-                elif "Number of training examples" in line:
-                    examples = int(line.split()[-1])
-                    if metrics['parallel']['train_time'] > 0:
-                        metrics['parallel']['images_per_sec'] = examples / metrics['parallel']['train_time']
+                if "Total Processing Time:" in line or "Total Processing Time" in line:
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if part.replace('.', '', 1).isdigit():
+                            metrics['parallel']['train_time'] = float(part)
+                            break
+                elif "Data Loading Time:" in line or "Data Loading Time" in line:
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if part.replace('.', '', 1).isdigit():
+                            metrics['parallel']['loading_time'] = float(part)
+                            break
+                elif "Memory Usage:" in line or "Memory Usage" in line:
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if part.replace('.', '', 1).isdigit():
+                            metrics['parallel']['train_memory'] = float(part)
+                            break
+                elif "Classification Accuracy:" in line or "Classification Accuracy" in line:
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if part.replace('.', '', 1).isdigit():
+                            metrics['parallel']['accuracy'] = float(part)
+                            break
+                elif "Number of Training Examples:" in line or "Number of Training Examples" in line:
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if part.isdigit():
+                            examples = int(part)
+                            if metrics['parallel']['train_time'] > 0:
+                                metrics['parallel']['images_per_sec'] = examples / metrics['parallel']['train_time']
+                            break
         except Exception as e:
             print(f"Error parsing CUDA training metrics: {e}")
     else:
         print(f"CUDA training failed with code {code}")
+        print(f"CUDA training stderr: {stderr}")
         sys.exit(1)
     
     # Run CUDA prediction benchmark
@@ -399,18 +458,35 @@ def benchmark():
         if code == 0:
             try:
                 for line in stdout.splitlines():
-                    if "Total Processing Time" in line:
-                        metrics['parallel']['predict_time'] = float(line.split()[-1])
-                    elif "Feature Extraction Time" in line:
-                        metrics['parallel']['feature_time'] = float(line.split()[-1])
-                    elif "Classification Time" in line:
-                        metrics['parallel']['knn_time'] = float(line.split()[-1])
-                    elif "Memory Usage" in line:
-                        metrics['parallel']['predict_memory'] = float(line.split()[-2])
+                    if "Total Processing Time:" in line or "Total Processing Time" in line:
+                        parts = line.split()
+                        for i, part in enumerate(parts):
+                            if part.replace('.', '', 1).isdigit():
+                                metrics['parallel']['predict_time'] = float(part)
+                                break
+                    elif "Feature Extraction Time:" in line or "Feature Extraction Time" in line:
+                        parts = line.split()
+                        for i, part in enumerate(parts):
+                            if part.replace('.', '', 1).isdigit():
+                                metrics['parallel']['feature_time'] = float(part)
+                                break
+                    elif "Classification Time:" in line or "Classification Time" in line:
+                        parts = line.split()
+                        for i, part in enumerate(parts):
+                            if part.replace('.', '', 1).isdigit():
+                                metrics['parallel']['knn_time'] = float(part)
+                                break
+                    elif "Memory Usage:" in line or "Memory Usage" in line:
+                        parts = line.split()
+                        for i, part in enumerate(parts):
+                            if part.replace('.', '', 1).isdigit():
+                                metrics['parallel']['predict_memory'] = float(part)
+                                break
             except Exception as e:
                 print(f"Error parsing CUDA prediction metrics: {e}")
         else:
             print(f"CUDA prediction failed with code {code}")
+            print(f"CUDA prediction stderr: {stderr}")
             sys.exit(1)
     
     # Generate visualization based on the collected metrics
