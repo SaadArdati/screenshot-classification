@@ -10,8 +10,8 @@ if(WIN32)
         set(CMAKE_CUDA_COMPILER "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6/bin/nvcc.exe")
     endif()
 else()
-    # Tesla T4 settings
-    set(CMAKE_CUDA_ARCHITECTURES 75)  # Tesla T4 architecture
+    # Jetson Orin Nano settings
+    set(CMAKE_CUDA_ARCHITECTURES 87)  # Ampere architecture
     set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
 endif()
 
@@ -81,11 +81,7 @@ install(TARGETS train_cuda predict_cuda cuda_components
 
 # Set CUDA specific flags
 set_target_properties(train_cuda PROPERTIES
-    CUDA_FLAGS "-G --ptxas-options=-v --gpu-code=sm_75 --gpu-architecture=sm_75"
-)
-
-set_target_properties(predict_cuda PROPERTIES
-    CUDA_FLAGS "-G --ptxas-options=-v --gpu-code=sm_75 --gpu-architecture=sm_75 --forward-unknown-to-host-compiler"
+    CUDA_FLAGS "-G"
 )
 
 # Print platform-specific information
