@@ -10,8 +10,8 @@ if(WIN32)
         set(CMAKE_CUDA_COMPILER "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6/bin/nvcc.exe")
     endif()
 else()
-    # Jetson Orin Nano settings
-    set(CMAKE_CUDA_ARCHITECTURES 87)  # Ampere architecture
+    # Tesla T4 settings
+    set(CMAKE_CUDA_ARCHITECTURES 75)  # Tesla T4 architecture
     set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
 endif()
 
