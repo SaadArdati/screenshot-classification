@@ -126,6 +126,11 @@ def clone_repositories():
 
     # Change to project directory
     os.chdir("screenshot-classification")
+    
+    # Make build script executable
+    print("Making build script executable...")
+    run_cmd("chmod +x build.sh")
+    run_cmd("chmod +x benchmark.sh")
 
 def download_datasets():
     """Download and extract datasets from Kaggle or direct URLs"""
@@ -246,40 +251,24 @@ def prepare_sample_data():
         run_cmd("cp screenshot.jpeg data/screenshots/test/screenshot.jpeg")
         print("Screenshot image added to dataset")
     else:
-        # Fallback to test.jpeg from the repository
-        run_cmd("cp test.jpeg data/screenshots/train/screenshot.jpeg")
-        run_cmd("cp test.jpeg data/screenshots/test/screenshot.jpeg")
-        print("Using test.jpeg from repository as screenshot")
+        print("Screenshot image not found, benchmarking may fail")
     
     if nonscreenshot_exists:
         run_cmd("cp nonscreenshot.png data/non_screenshots/train/nonscreenshot.png")
         run_cmd("cp nonscreenshot.png data/non_screenshots/test/nonscreenshot.png")
         print("Non-screenshot image added to dataset")
     else:
-        # Create a simple non-screenshot image if needed
-        print("Creating a sample non-screenshot image")
-        run_cmd("python -c \"from PIL import Image; img = Image.new('RGB', (256, 256), (255, 200, 200)); img.save('data/non_screenshots/train/sample_nonscreenshot.png'); img.save('data/non_screenshots/test/sample_nonscreenshot.png')\"")
+        print("Non-screenshot image not found, benchmarking may fail")
     
     print("Sample data setup complete")
 
-def direct_benchmark():
-    """Run direct benchmarking by running executables and capturing output"""
-    print("\nRunning direct benchmarking...")
+def benchmark():
+    """Run benchmarking by running executables and capturing output"""
+    print("\nRunning benchmarking...")
     
     # Create results directory
     run_cmd("mkdir -p benchmark_results")
     
-    # Check for visualization directory first
-    visualizations_exist = os.path.exists("visualizations") and os.path.isdir("visualizations")
-    
-    if visualizations_exist:
-        print("Found existing visualization files, using them for results...")
-        # Copy visualization files to current directory
-        for viz_file in glob.glob("visualizations/*.png"):
-            shutil.copy(viz_file, ".")
-            print(f"Copied {viz_file} to current directory")
-        return
-        
     # Define benchmark metrics
     metrics = {
         'sequential': {
@@ -315,183 +304,121 @@ def direct_benchmark():
     print(f"Sequential executables exist: Train {seq_train_exists}, Predict {seq_predict_exists}")
     print(f"CUDA executables exist: Train {cuda_train_exists}, Predict {cuda_predict_exists}")
     
+    # Exit if not all executables exist
+    if not seq_train_exists or not seq_predict_exists or not cuda_train_exists or not cuda_predict_exists:
+        print("Error: Both sequential AND CUDA executables must be available for benchmarking. Exiting.")
+        sys.exit(1)
+    
     # Run sequential training benchmark
-    if seq_train_exists:
-        print("\nRunning sequential training...")
-        stdout, stderr, code = run_cmd("./build/bin/train_seq model_sequential.bin", capture_output=True)
-        
-        if code == 0:
-            print("Sequential training completed successfully")
-            # Parse output for metrics
-            try:
-                for line in stdout.splitlines():
-                    if "Total Processing Time" in line:
-                        metrics['sequential']['train_time'] = float(line.split()[-1])
-                    elif "Data Loading Time" in line:
-                        metrics['sequential']['loading_time'] = float(line.split()[-1])
-                    elif "Memory Usage" in line:
-                        metrics['sequential']['train_memory'] = float(line.split()[-2])
-                    elif "Accuracy" in line:
-                        metrics['sequential']['accuracy'] = float(line.split()[-2])
-                    elif "Number of training examples" in line:
-                        examples = int(line.split()[-1])
-                        if metrics['sequential']['train_time'] > 0:
-                            metrics['sequential']['images_per_sec'] = examples / metrics['sequential']['train_time']
-            except Exception as e:
-                print(f"Error parsing sequential training metrics: {e}")
-        else:
-            print(f"Sequential training failed with code {code}")
+    print("\nRunning sequential training...")
+    stdout, stderr, code = run_cmd("./build/bin/train_seq model_sequential.bin", capture_output=True)
+    
+    if code == 0:
+        print("Sequential training completed successfully")
+        # Parse output for metrics
+        try:
+            for line in stdout.splitlines():
+                if "Total Processing Time" in line:
+                    metrics['sequential']['train_time'] = float(line.split()[-1])
+                elif "Data Loading Time" in line:
+                    metrics['sequential']['loading_time'] = float(line.split()[-1])
+                elif "Memory Usage" in line:
+                    metrics['sequential']['train_memory'] = float(line.split()[-2])
+                elif "Accuracy" in line:
+                    metrics['sequential']['accuracy'] = float(line.split()[-2])
+                elif "Number of training examples" in line:
+                    examples = int(line.split()[-1])
+                    if metrics['sequential']['train_time'] > 0:
+                        metrics['sequential']['images_per_sec'] = examples / metrics['sequential']['train_time']
+        except Exception as e:
+            print(f"Error parsing sequential training metrics: {e}")
+    else:
+        print(f"Sequential training failed with code {code}")
+        sys.exit(1)
     
     # Run sequential prediction benchmark
-    if seq_predict_exists:
-        print("\nRunning sequential prediction...")
-        # Find a test image
-        screenshot_img = next(iter(glob.glob("data/screenshots/test/*.*")), None)
-        
-        if screenshot_img:
-            total_times = []
-            feature_times = []
-            knn_times = []
-            memory_usages = []
-            
-            for i in range(5):  # Run 5 iterations
-                stdout, stderr, code = run_cmd(f"./build/bin/predict_seq model_sequential.bin \"{screenshot_img}\"", capture_output=True)
-                
-                if code == 0:
-                    try:
-                        total_time = 0.0
-                        feature_time = 0.0
-                        knn_time = 0.0
-                        memory = 0.0
-                        
-                        for line in stdout.splitlines():
-                            if "Total Processing Time" in line:
-                                total_time = float(line.split()[-1])
-                                total_times.append(total_time)
-                            elif "Feature Extraction Time" in line:
-                                feature_time = float(line.split()[-1])
-                                feature_times.append(feature_time)
-                            elif "Classification Time" in line:
-                                knn_time = float(line.split()[-1])
-                                knn_times.append(knn_time)
-                            elif "Memory Usage" in line:
-                                memory = float(line.split()[-2])
-                                memory_usages.append(memory)
-                    except Exception as e:
-                        print(f"Error parsing sequential prediction metrics: {e}")
-                else:
-                    print(f"Sequential prediction failed with code {code}")
-            
-            # Calculate averages
-            if total_times:
-                metrics['sequential']['predict_time'] = sum(total_times) / len(total_times)
-            if feature_times:
-                metrics['sequential']['feature_time'] = sum(feature_times) / len(feature_times)
-            if knn_times:
-                metrics['sequential']['knn_time'] = sum(knn_times) / len(knn_times)
-            if memory_usages:
-                metrics['sequential']['predict_memory'] = sum(memory_usages) / len(memory_usages)
-                
-            print(f"Sequential prediction metrics: Time {metrics['sequential']['predict_time']:.6f}s, "
-                  f"Feature {metrics['sequential']['feature_time']:.6f}s, "
-                  f"KNN {metrics['sequential']['knn_time']:.6f}s")
-        else:
-            print("No test image found for prediction benchmark")
+    print("\nRunning sequential prediction...")
+    # Find a test image
+    screenshot_img = next(iter(glob.glob("data/screenshots/test/*.*")), None)
     
-    # Run CUDA training benchmark if available
-    if cuda_train_exists:
-        print("\nRunning CUDA training...")
-        stdout, stderr, code = run_cmd("./build/bin/train_cuda model_parallel.bin", capture_output=True)
+    if screenshot_img:
+        stdout, stderr, code = run_cmd(f"./build/bin/predict_seq model_sequential.bin \"{screenshot_img}\"", capture_output=True)
         
         if code == 0:
-            print("CUDA training completed successfully")
-            # Parse output for metrics
             try:
                 for line in stdout.splitlines():
                     if "Total Processing Time" in line:
-                        metrics['parallel']['train_time'] = float(line.split()[-1])
-                    elif "Data Loading Time" in line:
-                        metrics['parallel']['loading_time'] = float(line.split()[-1])
+                        metrics['sequential']['predict_time'] = float(line.split()[-1])
+                    elif "Feature Extraction Time" in line:
+                        metrics['sequential']['feature_time'] = float(line.split()[-1])
+                    elif "Classification Time" in line:
+                        metrics['sequential']['knn_time'] = float(line.split()[-1])
                     elif "Memory Usage" in line:
-                        metrics['parallel']['train_memory'] = float(line.split()[-2])
-                    elif "Accuracy" in line:
-                        metrics['parallel']['accuracy'] = float(line.split()[-2])
-                    elif "Number of training examples" in line:
-                        examples = int(line.split()[-1])
-                        if metrics['parallel']['train_time'] > 0:
-                            metrics['parallel']['images_per_sec'] = examples / metrics['parallel']['train_time']
+                        metrics['sequential']['predict_memory'] = float(line.split()[-2])
             except Exception as e:
-                print(f"Error parsing CUDA training metrics: {e}")
+                print(f"Error parsing sequential prediction metrics: {e}")
         else:
-            print(f"CUDA training failed with code {code}")
+            print(f"Sequential prediction failed with code {code}")
+            sys.exit(1)
+    else:
+        print("No test image found for prediction benchmark")
+        sys.exit(1)
     
-    # Run CUDA prediction benchmark if available
-    if cuda_predict_exists:
-        print("\nRunning CUDA prediction...")
-        # Find a test image
-        screenshot_img = next(iter(glob.glob("data/screenshots/test/*.*")), None)
+    # Run CUDA training benchmark
+    print("\nRunning CUDA training...")
+    stdout, stderr, code = run_cmd("./build/bin/train_cuda model_parallel.bin", capture_output=True)
+    
+    if code == 0:
+        print("CUDA training completed successfully")
+        # Parse output for metrics
+        try:
+            for line in stdout.splitlines():
+                if "Total Processing Time" in line:
+                    metrics['parallel']['train_time'] = float(line.split()[-1])
+                elif "Data Loading Time" in line:
+                    metrics['parallel']['loading_time'] = float(line.split()[-1])
+                elif "Memory Usage" in line:
+                    metrics['parallel']['train_memory'] = float(line.split()[-2])
+                elif "Accuracy" in line:
+                    metrics['parallel']['accuracy'] = float(line.split()[-2])
+                elif "Number of training examples" in line:
+                    examples = int(line.split()[-1])
+                    if metrics['parallel']['train_time'] > 0:
+                        metrics['parallel']['images_per_sec'] = examples / metrics['parallel']['train_time']
+        except Exception as e:
+            print(f"Error parsing CUDA training metrics: {e}")
+    else:
+        print(f"CUDA training failed with code {code}")
+        sys.exit(1)
+    
+    # Run CUDA prediction benchmark
+    print("\nRunning CUDA prediction...")
+    if screenshot_img:
+        stdout, stderr, code = run_cmd(f"./build/bin/predict_cuda model_parallel.bin \"{screenshot_img}\"", capture_output=True)
         
-        if screenshot_img:
-            total_times = []
-            feature_times = []
-            knn_times = []
-            memory_usages = []
-            
-            for i in range(5):  # Run 5 iterations
-                stdout, stderr, code = run_cmd(f"./build/bin/predict_cuda model_parallel.bin \"{screenshot_img}\"", capture_output=True)
-                
-                if code == 0:
-                    try:
-                        total_time = 0.0
-                        feature_time = 0.0
-                        knn_time = 0.0
-                        memory = 0.0
-                        
-                        for line in stdout.splitlines():
-                            if "Total Processing Time" in line:
-                                total_time = float(line.split()[-1])
-                                total_times.append(total_time)
-                            elif "Feature Extraction Time" in line:
-                                feature_time = float(line.split()[-1])
-                                feature_times.append(feature_time)
-                            elif "Classification Time" in line:
-                                knn_time = float(line.split()[-1])
-                                knn_times.append(knn_time)
-                            elif "Memory Usage" in line:
-                                memory = float(line.split()[-2])
-                                memory_usages.append(memory)
-                    except Exception as e:
-                        print(f"Error parsing CUDA prediction metrics: {e}")
-                else:
-                    print(f"CUDA prediction failed with code {code}")
-            
-            # Calculate averages
-            if total_times:
-                metrics['parallel']['predict_time'] = sum(total_times) / len(total_times)
-            if feature_times:
-                metrics['parallel']['feature_time'] = sum(feature_times) / len(feature_times)
-            if knn_times:
-                metrics['parallel']['knn_time'] = sum(knn_times) / len(knn_times)
-            if memory_usages:
-                metrics['parallel']['predict_memory'] = sum(memory_usages) / len(memory_usages)
-                
-            print(f"CUDA prediction metrics: Time {metrics['parallel']['predict_time']:.6f}s, "
-                  f"Feature {metrics['parallel']['feature_time']:.6f}s, "
-                  f"KNN {metrics['parallel']['knn_time']:.6f}s")
+        if code == 0:
+            try:
+                for line in stdout.splitlines():
+                    if "Total Processing Time" in line:
+                        metrics['parallel']['predict_time'] = float(line.split()[-1])
+                    elif "Feature Extraction Time" in line:
+                        metrics['parallel']['feature_time'] = float(line.split()[-1])
+                    elif "Classification Time" in line:
+                        metrics['parallel']['knn_time'] = float(line.split()[-1])
+                    elif "Memory Usage" in line:
+                        metrics['parallel']['predict_memory'] = float(line.split()[-2])
+            except Exception as e:
+                print(f"Error parsing CUDA prediction metrics: {e}")
         else:
-            print("No test image found for prediction benchmark")
+            print(f"CUDA prediction failed with code {code}")
+            sys.exit(1)
     
-    # Generate visualization files using the metrics
+    # Generate visualization based on the collected metrics
     generate_visualizations(metrics)
 
 def generate_visualizations(metrics):
     """Generate visualization plots based on the gathered metrics"""
     print("\nGenerating visualization plots...")
-    
-    # Check if we have real benchmark data
-    if metrics['sequential']['train_time'] <= 0.0001 and metrics['parallel']['train_time'] <= 0.0001:
-        print("No real benchmark data collected. Exiting.")
-        sys.exit(1)
     
     # Calculate speedups
     seq_train_total_time = metrics['sequential']['train_time']
@@ -503,25 +430,10 @@ def generate_visualizations(metrics):
     seq_predict_knn_time = metrics['sequential']['knn_time']
     cuda_predict_knn_time = metrics['parallel']['knn_time']
     
-    if cuda_train_total_time > 0 and seq_train_total_time > 0:
-        train_speedup = seq_train_total_time / cuda_train_total_time
-    else:
-        train_speedup = 0
-    
-    if cuda_predict_total_time > 0 and seq_predict_total_time > 0:
-        predict_speedup = seq_predict_total_time / cuda_predict_total_time
-    else:
-        predict_speedup = 0
-    
-    if cuda_predict_feature_time > 0 and seq_predict_feature_time > 0:
-        feature_speedup = seq_predict_feature_time / cuda_predict_feature_time
-    else:
-        feature_speedup = 0
-    
-    if cuda_predict_knn_time > 0 and seq_predict_knn_time > 0:
-        knn_speedup = seq_predict_knn_time / cuda_predict_knn_time
-    else:
-        knn_speedup = 0
+    train_speedup = seq_train_total_time / cuda_train_total_time if cuda_train_total_time > 0 else 0
+    predict_speedup = seq_predict_total_time / cuda_predict_total_time if cuda_predict_total_time > 0 else 0
+    feature_speedup = seq_predict_feature_time / cuda_predict_feature_time if cuda_predict_feature_time > 0 else 0
+    knn_speedup = seq_predict_knn_time / cuda_predict_knn_time if cuda_predict_knn_time > 0 else 0
     
     # Create time comparison plot
     plt.figure(figsize=(14, 6))
@@ -570,30 +482,6 @@ def generate_visualizations(metrics):
     plt.savefig('time_distribution_comparison.png')
     print("Time distribution comparison saved to time_distribution_comparison.png")
     
-    # Create memory comparison plot
-    plt.figure(figsize=(10, 6))
-    memory_usage = [metrics['sequential']['train_memory'], metrics['parallel']['train_memory']]
-    plt.bar(['Sequential', 'CUDA'], memory_usage, color=['blue', 'green'])
-    plt.title('Memory Usage Comparison')
-    plt.ylabel('Memory (MB)')
-    for i, v in enumerate(memory_usage):
-        plt.text(i, v + 0.5, f'{v:.2f} MB', ha='center')
-    plt.tight_layout()
-    plt.savefig('memory_comparison.png')
-    print("Memory comparison saved to memory_comparison.png")
-    
-    # Create processing speed comparison
-    plt.figure(figsize=(10, 6))
-    processing_speed = [metrics['sequential']['images_per_sec'], metrics['parallel']['images_per_sec']]
-    plt.bar(['Sequential', 'CUDA'], processing_speed, color=['blue', 'green'])
-    plt.title('Processing Speed Comparison')
-    plt.ylabel('Images per Second')
-    for i, v in enumerate(processing_speed):
-        plt.text(i, v + 5, f'{v:.2f} img/s', ha='center')
-    plt.tight_layout()
-    plt.savefig('processing_time_comparison.png')
-    print("Processing speed comparison saved to processing_time_comparison.png")
-    
     # Create speedup comparison
     plt.figure(figsize=(10, 6))
     speedups = [train_speedup, predict_speedup, feature_speedup, knn_speedup]
@@ -607,85 +495,182 @@ def generate_visualizations(metrics):
     plt.savefig('speedup_comparison.png')
     print("Speedup comparison saved to speedup_comparison.png")
     
-    # Create metrics comparison dashboard
-    plt.figure(figsize=(12, 8))
-    plt.subplot(2, 2, 1)
-    plt.bar(['Sequential', 'CUDA'], [seq_train_total_time, cuda_train_total_time], color=['blue', 'green'])
-    plt.title('Total Processing Time (s)')
-    
-    plt.subplot(2, 2, 2)
-    plt.bar(['Sequential', 'CUDA'], [metrics['sequential']['train_memory'], metrics['parallel']['train_memory']], color=['blue', 'green'])
-    plt.title('Memory Usage (MB)')
-    
-    plt.subplot(2, 2, 3)
-    plt.bar(['Sequential', 'CUDA'], [metrics['sequential']['images_per_sec'], metrics['parallel']['images_per_sec']], color=['blue', 'green'])
-    plt.title('Processing Speed (img/s)')
-    
-    plt.subplot(2, 2, 4)
-    plt.bar(['Sequential', 'CUDA'], [metrics['sequential']['accuracy'], metrics['parallel']['accuracy']], color=['blue', 'green'])
-    plt.title('Classification Accuracy (%)')
-    
-    plt.suptitle('Performance Metrics Comparison')
-    plt.tight_layout()
-    plt.savefig('metrics_comparison.png')
-    print("Metrics comparison saved to metrics_comparison.png")
-    
     # Print summary report
     print("\nBenchmark Results Summary:")
     print("==========================")
     print(f"Training Time (Sequential): {seq_train_total_time:.4f} seconds")
-    if cuda_train_total_time > 0:
-        print(f"Training Time (CUDA): {cuda_train_total_time:.4f} seconds")
-        print(f"Training Speedup: {train_speedup:.2f}x")
+    print(f"Training Time (CUDA): {cuda_train_total_time:.4f} seconds")
+    print(f"Training Speedup: {train_speedup:.2f}x")
     
     print(f"\nPrediction Time (Sequential): {seq_predict_total_time:.6f} seconds")
-    if cuda_predict_total_time > 0:
-        print(f"Prediction Time (CUDA): {cuda_predict_total_time:.6f} seconds")
-        print(f"Prediction Speedup: {predict_speedup:.2f}x")
+    print(f"Prediction Time (CUDA): {cuda_predict_total_time:.6f} seconds")
+    print(f"Prediction Speedup: {predict_speedup:.2f}x")
     
     print(f"\nFeature Extraction Time (Sequential): {seq_predict_feature_time:.6f} seconds")
-    if cuda_predict_feature_time > 0:
-        print(f"Feature Extraction Time (CUDA): {cuda_predict_feature_time:.6f} seconds")
-        print(f"Feature Extraction Speedup: {feature_speedup:.2f}x")
+    print(f"Feature Extraction Time (CUDA): {cuda_predict_feature_time:.6f} seconds")
+    print(f"Feature Extraction Speedup: {feature_speedup:.2f}x")
     
     print(f"\nKNN Computation Time (Sequential): {seq_predict_knn_time:.6f} seconds")
-    if cuda_predict_knn_time > 0:
-        print(f"KNN Computation Time (CUDA): {cuda_predict_knn_time:.6f} seconds")
-        print(f"KNN Computation Speedup: {knn_speedup:.2f}x")
-    
-    print(f"\nMemory Usage (Sequential): {metrics['sequential']['train_memory']:.2f} MB")
-    if metrics['parallel']['train_memory'] > 0:
-        print(f"Memory Usage (CUDA): {metrics['parallel']['train_memory']:.2f} MB")
-    
-    print(f"\nProcessing Speed (Sequential): {metrics['sequential']['images_per_sec']:.2f} images/second")
-    if metrics['parallel']['images_per_sec'] > 0:
-        print(f"Processing Speed (CUDA): {metrics['parallel']['images_per_sec']:.2f} images/second")
-    
-    print(f"\nClassification Accuracy (Sequential): {metrics['sequential']['accuracy']:.2f}%")
-    if metrics['parallel']['accuracy'] > 0:
-        print(f"Classification Accuracy (CUDA): {metrics['parallel']['accuracy']:.2f}%")
+    print(f"KNN Computation Time (CUDA): {cuda_predict_knn_time:.6f} seconds")
+    print(f"KNN Computation Speedup: {knn_speedup:.2f}x")
 
-def build_and_benchmark(has_cuda):
-    """Build and benchmark the project using the new approach"""
+def build():
+    """Build both sequential and CUDA implementations with detailed error reporting"""
     print("Building sequential implementation...")
-    run_cmd("./build.sh --mode=sequential")
+    
+    # First, check if we're in the correct directory
+    stdout, stderr, code = run_cmd("pwd", capture_output=True)
+    print(f"Current directory: {stdout.strip()}")
+    
+    # Check build.sh exists and is executable
+    if not os.path.exists("build.sh"):
+        print("Error: build.sh not found in current directory.")
+        return False
+    
+    # Check CMake is installed
+    stdout, stderr, code = run_cmd("cmake --version", capture_output=True)
+    if code != 0:
+        print("Error: CMake not found. Please install CMake.")
+        return False
+    
+    # Show sequential build details
+    print("Running sequential build with output:")
+    stdout, stderr, code = run_cmd("./build.sh --mode=sequential", capture_output=True)
+    print(f"Build stdout: {stdout}")
+    if stderr:
+        print(f"Build stderr: {stderr}")
     
     # Check if sequential build succeeded
     if not os.path.exists("build/bin/train_seq") or not os.path.exists("build/bin/predict_seq"):
-        print("Error: Sequential build failed. Executables not found. Exiting.")
-        sys.exit(1)
-    
-    if has_cuda:
-        print("Building CUDA implementation...")
-        run_cmd("./build.sh --mode=parallel")
+        print("Error: Sequential build failed. Trying to diagnose the issue...")
         
-        # Check if CUDA build succeeded
-        if not os.path.exists("build/bin/train_cuda") or not os.path.exists("build/bin/predict_cuda"):
-            print("Error: CUDA build failed. Executables not found. Exiting.")
-            sys.exit(1)
+        # Check CMake output
+        if os.path.exists("build/CMakeCache.txt"):
+            stdout, stderr, code = run_cmd("cat build/CMakeCache.txt | grep -E 'CMAKE_C_COMPILER|CMAKE_CXX_COMPILER'", capture_output=True)
+            print(f"CMake compiler settings: {stdout}")
+        else:
+            print("CMake cache file not found.")
+        
+        # Check if build directory was created
+        if not os.path.exists("build"):
+            print("Error: Build directory not created.")
+            return False
+        
+        # Check for common build files
+        stdout, stderr, code = run_cmd("ls -la build/", capture_output=True)
+        print(f"Build directory contents: {stdout}")
+        
+        # Check for compilation errors in CMake logs
+        if os.path.exists("build/CMakeFiles/CMakeError.log"):
+            stdout, stderr, code = run_cmd("tail -n 50 build/CMakeFiles/CMakeError.log", capture_output=True)
+            print(f"CMake error log: {stdout}")
+        
+        # Try to manually build
+        print("Attempting manual build with more verbose output...")
+        run_cmd("mkdir -p build")
+        os.chdir("build")
+        stdout, stderr, code = run_cmd("cmake -DBUILD_MODE=sequential ..", capture_output=True)
+        print(f"CMake output: {stdout}")
+        if stderr:
+            print(f"CMake errors: {stderr}")
+        
+        stdout, stderr, code = run_cmd("make VERBOSE=1", capture_output=True)
+        print(f"Make output: {stdout}")
+        if stderr:
+            print(f"Make errors: {stderr}")
+        
+        os.chdir("..")
+        
+        # Check again after manual build
+        if not os.path.exists("build/bin/train_seq") or not os.path.exists("build/bin/predict_seq"):
+            print("Error: Sequential build failed even after manual attempt.")
+            
+            # Check if executables were built but in a different location
+            stdout, stderr, code = run_cmd("find build -name '*_seq' -type f", capture_output=True)
+            if stdout:
+                print(f"Found executables in non-standard locations: {stdout}")
+                print("Trying to copy them to the expected location...")
+                run_cmd("mkdir -p build/bin")
+                for line in stdout.splitlines():
+                    exe_path = line.strip()
+                    if exe_path:
+                        run_cmd(f"cp {exe_path} build/bin/")
+                
+                # Check once more
+                if os.path.exists("build/bin/train_seq") and os.path.exists("build/bin/predict_seq"):
+                    print("Successfully copied executables to the correct location.")
+                else:
+                    print("Failed to find or copy required executables.")
+                    return False
+            else:
+                print("No sequential executables found anywhere in the build directory.")
+                return False
     
-    # Run direct benchmarking
-    direct_benchmark()
+    print("Sequential build successful.")
+    
+    print("Building CUDA implementation...")
+    stdout, stderr, code = run_cmd("./build.sh --mode=parallel", capture_output=True)
+    print(f"CUDA build stdout: {stdout}")
+    if stderr:
+        print(f"CUDA build stderr: {stderr}")
+    
+    # Check if CUDA build succeeded
+    if not os.path.exists("build/bin/train_cuda") or not os.path.exists("build/bin/predict_cuda"):
+        print("Error: CUDA build failed. Trying to diagnose the issue...")
+        
+        # Check CUDA toolkit information
+        stdout, stderr, code = run_cmd("nvcc --version", capture_output=True)
+        print(f"NVCC version: {stdout}")
+        
+        # Check GPU information
+        stdout, stderr, code = run_cmd("nvidia-smi", capture_output=True)
+        print(f"GPU information: {stdout}")
+        
+        # Try to manually build
+        print("Attempting manual CUDA build with more verbose output...")
+        run_cmd("mkdir -p build")
+        os.chdir("build")
+        stdout, stderr, code = run_cmd("cmake -DBUILD_MODE=parallel ..", capture_output=True)
+        print(f"CMake output: {stdout}")
+        if stderr:
+            print(f"CMake errors: {stderr}")
+        
+        stdout, stderr, code = run_cmd("make VERBOSE=1", capture_output=True)
+        print(f"Make output: {stdout}")
+        if stderr:
+            print(f"Make errors: {stderr}")
+        
+        os.chdir("..")
+        
+        # Check again after manual build
+        if not os.path.exists("build/bin/train_cuda") or not os.path.exists("build/bin/predict_cuda"):
+            print("Error: CUDA build failed even after manual attempt.")
+            
+            # Check if executables were built but in a different location
+            stdout, stderr, code = run_cmd("find build -name '*_cuda' -type f", capture_output=True)
+            if stdout:
+                print(f"Found executables in non-standard locations: {stdout}")
+                print("Trying to copy them to the expected location...")
+                run_cmd("mkdir -p build/bin")
+                for line in stdout.splitlines():
+                    exe_path = line.strip()
+                    if exe_path:
+                        run_cmd(f"cp {exe_path} build/bin/")
+                
+                # Check once more
+                if os.path.exists("build/bin/train_cuda") and os.path.exists("build/bin/predict_cuda"):
+                    print("Successfully copied executables to the correct location.")
+                else:
+                    print("Failed to find or copy required CUDA executables.")
+                    return False
+            else:
+                print("No CUDA executables found anywhere in the build directory.")
+                return False
+    
+    print("CUDA build successful.")
+    
+    # Both builds succeeded
+    return True
 
 def main():
     """Main function to run the entire workflow"""
@@ -698,25 +683,27 @@ def main():
     setup_kaggle()
     
     # Check CUDA availability
-    has_cuda = check_cuda()
+    check_cuda()
     
     # Clone repositories
     clone_repositories()
     
-    # Prepare sample data using provided images
+    # Prepare sample data
     prepare_sample_data()
     
-    # Build and benchmark
-    build_and_benchmark(has_cuda)
-    
-    print("\nSetup and benchmarking complete!")
-    print("You can find the benchmark results in the visualization PNG files:")
-    print("- time_comparison.png")
-    print("- time_distribution_comparison.png")
-    print("- memory_comparison.png")
-    print("- processing_time_comparison.png")
-    print("- speedup_comparison.png")
-    print("- metrics_comparison.png")
+    # Build both implementations
+    if build():
+        # Run benchmarks if builds succeeded
+        benchmark()
+        
+        print("\nSetup and benchmarking complete!")
+        print("You can find the benchmark results in the visualization PNG files:")
+        print("- time_comparison.png")
+        print("- time_distribution_comparison.png")
+        print("- speedup_comparison.png")
+    else:
+        print("Failed to build both sequential and CUDA implementations. Cannot perform benchmarking.")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
