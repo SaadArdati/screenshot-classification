@@ -231,9 +231,9 @@ int main(int argc, char** argv) {
     printf("Model path: %s\n\n", modelPath);
     
     // Allocate memory for features
-    const int MAX_IMAGES = 1000;
-    Feature* trainFeatures = (Feature*)malloc(MAX_IMAGES * sizeof(Feature));
-    Feature* testFeatures = (Feature*)malloc(MAX_IMAGES * sizeof(Feature));
+    const int MAX_IMG_COUNT = 50000;
+    Feature* trainFeatures = (Feature*)malloc(MAX_IMG_COUNT * sizeof(Feature));
+    Feature* testFeatures = (Feature*)malloc(MAX_IMG_COUNT * sizeof(Feature));
     
     if (!trainFeatures || !testFeatures) {
         fprintf(stderr, "Failed to allocate memory for features\n");
@@ -247,10 +247,10 @@ int main(int argc, char** argv) {
     clock_t data_start = clock();
     
     printf("Loading screenshot training images...\n");
-    loadImagesFromDir(screenshots_train_dir, 1, trainFeatures, &trainCount, MAX_IMAGES);
+    loadImagesFromDir(screenshots_train_dir, 1, trainFeatures, &trainCount, MAX_IMG_COUNT);
     
     printf("Loading non-screenshot training images...\n");
-    loadImagesFromDir(non_screenshots_train_dir, 0, trainFeatures, &trainCount, MAX_IMAGES);
+    loadImagesFromDir(non_screenshots_train_dir, 0, trainFeatures, &trainCount, MAX_IMG_COUNT);
     
     printf("Training data loaded: %d images\n", trainCount);
     
@@ -258,10 +258,10 @@ int main(int argc, char** argv) {
     int testCount = 0;
     
     printf("Loading screenshot test images...\n");
-    loadImagesFromDir(screenshots_test_dir, 1, testFeatures, &testCount, MAX_IMAGES);
+    loadImagesFromDir(screenshots_test_dir, 1, testFeatures, &testCount, MAX_IMG_COUNT);
     
     printf("Loading non-screenshot test images...\n");
-    loadImagesFromDir(non_screenshots_test_dir, 0, testFeatures, &testCount, MAX_IMAGES);
+    loadImagesFromDir(non_screenshots_test_dir, 0, testFeatures, &testCount, MAX_IMG_COUNT);
     
     printf("Test data loaded: %d images\n", testCount);
     
