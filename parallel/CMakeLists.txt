@@ -47,23 +47,42 @@ set(SOURCES
     src/knn.cu
 )
 
-# Add executable
-add_executable(train_cuda ${SOURCES})
+# Parallel CUDA implementation
 
-# Link CUDA libraries
-target_link_libraries(train_cuda ${CUDA_LIBRARIES})
+# Verify CUDA is available (should already be checked by parent)
+find_package(CUDA REQUIRED)
 
-# Set CUDA specific flags
-set_target_properties(train_cuda PROPERTIES
+# Include directories
+include_directories(${CMAKE_SOURCE_DIR}/include)
+
+# Create CUDA library with shared components
+cuda_add_library(cuda_components STATIC 
+    feature_extraction.cu
+    knn.cu
+)
+
+# Add executables
+cuda_add_executable(train_cuda training.cu)
+target_link_libraries(train_cuda cuda_components ${CUDA_LIBRARIES})
+
+cuda_add_executable(predict_cuda predict.cu)
+target_link_libraries(predict_cuda cuda_components ${CUDA_LIBRARIES})
+
+# Set CUDA properties
+set_target_properties(train_cuda predict_cuda PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
 )
 
-# Enable debug symbols in CUDA code
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set_target_properties(train_cuda PROPERTIES 
-        CUDA_FLAGS "-G"
-    )
-endif()
+# Install targets
+install(TARGETS train_cuda predict_cuda cuda_components
+        RUNTIME DESTINATION bin
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib)
+
+# Set CUDA specific flags
+set_target_properties(train_cuda PROPERTIES
+    CUDA_FLAGS "-G"
+)
 
 # Print platform-specific information
 message(STATUS "Building for platform: ${CMAKE_SYSTEM_NAME}")

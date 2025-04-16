@@ -5,17 +5,10 @@
 #include <string.h>
 #include <time.h>  // For timing measurements
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+#include "../include/stb_image.h"
+#include "../include/common.h"
 
-#define NUM_BINS 16
-#define K_NEIGHBORS 3
-
-typedef struct {
-    float bins[NUM_BINS];
-    int label; // 1 = screenshot, 0 = non-screenshot
-} Feature;
-
-// Compute normalized grayscale histogram
+// Compute normalized grayscale histogram with enhanced features for screenshots
 int extract_feature(const char *path, Feature *f) {
     int w, h, c;
     unsigned char *img = stbi_load(path, &w, &h, &c, 3);
@@ -23,15 +16,74 @@ int extract_feature(const char *path, Feature *f) {
 
     const int total = w * h;
     int counts[NUM_BINS] = {0};
-    for (int i = 0; i < total; i++) {
-        const int idx = i * 3;
-        const unsigned char gray = (img[idx] + img[idx + 1] + img[idx + 2]) / 3;
-        counts[gray * NUM_BINS / 256]++;
+    int edge_counts[NUM_BINS] = {0};
+    int top_counts[NUM_BINS] = {0};
+    int bottom_counts[NUM_BINS] = {0};
+    
+    // Previous row for edge detection
+    unsigned char *prev_row = malloc(w * 3 * sizeof(unsigned char));
+    if (!prev_row) {
+        stbi_image_free(img);
+        return -1;
     }
+    
+    // Copy first row to prev_row
+    for (int i = 0; i < w * 3; i++) {
+        prev_row[i] = img[i];
+    }
+    
+    // Process image for various features
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            const int idx = (y * w + x) * 3;
+            // Calculate grayscale
+            const unsigned char gray = (img[idx] + img[idx + 1] + img[idx + 2]) / 3;
+            const int bin = gray * NUM_BINS / 256;
+            
+            // Add to overall histogram
+            counts[bin]++;
+            
+            // Process top 5% region (status bar)
+            if (y < h * 0.05) {
+                top_counts[bin]++;
+            }
+            
+            // Process bottom 10% region (navigation bar)
+            if (y > h * 0.9) {
+                bottom_counts[bin]++;
+            }
+            
+            // Edge detection (simple horizontal gradient)
+            if (x > 0) {
+                const int prev_idx = idx - 3;
+                const unsigned char prev_gray = (img[prev_idx] + img[prev_idx + 1] + img[prev_idx + 2]) / 3;
+                int diff = abs(gray - prev_gray);
+                
+                // Vertical edge detection
+                if (y > 0) {
+                    const int above_idx = ((y-1) * w + x) * 3;
+                    const unsigned char above_gray = (img[above_idx] + img[above_idx + 1] + img[above_idx + 2]) / 3;
+                    int v_diff = abs(gray - above_gray);
+                    diff = (diff > v_diff) ? diff : v_diff;  // Take maximum gradient
+                }
+                
+                // If edge detected
+                if (diff > EDGE_THRESHOLD) {
+                    edge_counts[bin]++;
+                }
+            }
+        }
+    }
+    
+    free(prev_row);
     stbi_image_free(img);
 
+    // Normalize histograms
     for (int i = 0; i < NUM_BINS; i++) {
         f->bins[i] = (float) counts[i] / (float) total;
+        f->edge_bins[i] = (float) edge_counts[i] / (float) total;
+        f->top_region_bins[i] = (float) top_counts[i] / (float) (total * 0.05);
+        f->bottom_region_bins[i] = (float) bottom_counts[i] / (float) (total * 0.1);
     }
     return 0;
 }
@@ -76,10 +128,37 @@ int load_folder(const char *dirpath, const int label, Feature **arr, int *size) 
 
 float euclidean(const Feature *a, const Feature *b) {
     float sum = 0;
+    
+    // Weight for each feature type
+    const float hist_weight = 0.3;
+    const float edge_weight = 0.3;
+    const float top_weight = 0.2;
+    const float bottom_weight = 0.2;
+    
+    // Regular histogram distance
     for (int i = 0; i < NUM_BINS; i++) {
         const float diff = a->bins[i] - b->bins[i];
-        sum += diff * diff;
+        sum += hist_weight * diff * diff;
     }
+    
+    // Edge histogram distance
+    for (int i = 0; i < NUM_BINS; i++) {
+        const float diff = a->edge_bins[i] - b->edge_bins[i];
+        sum += edge_weight * diff * diff;
+    }
+    
+    // Top region histogram distance (status bar)
+    for (int i = 0; i < NUM_BINS; i++) {
+        const float diff = a->top_region_bins[i] - b->top_region_bins[i];
+        sum += top_weight * diff * diff;
+    }
+    
+    // Bottom region histogram distance (navigation bar)
+    for (int i = 0; i < NUM_BINS; i++) {
+        const float diff = a->bottom_region_bins[i] - b->bottom_region_bins[i];
+        sum += bottom_weight * diff * diff;
+    }
+    
     return sqrtf(sum);
 }
 

@@ -6,6 +6,7 @@ split_data/
 # Project-specific executable files
 predict
 training
+data
 
 # Model files
 *.bin

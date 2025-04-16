@@ -1,249 +1,173 @@
 # Screenshot Classification with CUDA
 
-A CUDA-accelerated implementation of screenshot classification using K-nearest neighbors (KNN) and grayscale histogram features.
+A screenshot classification system with both sequential (C) and CUDA-accelerated implementations using K-nearest neighbors (KNN) and grayscale histogram features.
 
 ## Project Overview
 
 This project implements a machine learning solution for classifying images as screenshots or non-screenshots using:
-- CUDA-accelerated feature extraction
-- Parallel KNN classification
-- Real-time performance monitoring
-- Visualization tools for performance analysis
+- Grayscale histogram features with edge detection
+- K-nearest neighbors classification
+- Both sequential (CPU) and parallel (CUDA) implementations
+- Performance monitoring tools
 
 ## Hardware Requirements
 
-- NVIDIA Jetson Orin Nano Developer Kit
-- Minimum 8GB RAM
+- Any system with a C compiler for the sequential implementation
+- NVIDIA GPU with CUDA support (only for the parallel implementation)
+- Minimum 8GB RAM recommended
 - Storage space for dataset
 
 ## Software Requirements
 
-1. JetPack SDK 6.0 or later
-2. CUDA Toolkit (included in JetPack)
-3. CMake 3.18 or later
-4. Python 3.x with matplotlib (for visualizations)
-5. GCC/G++ compiler
+1. C compiler (GCC, Clang, etc.)
+2. CMake 3.10 or later (for the full build)
+3. CUDA Toolkit 11.0 or later (only for the parallel implementation)
 
 ## Project Structure
 
 ```
 screenshot-classification/
-├── CMakeLists.txt          # Build configuration
-├── include/
-│   ├── stb_image.h        # Image loading library
-│   ├── cuda_utils.cuh     # CUDA utilities
-│   └── common.h          # Shared definitions
-├── src/
-│   ├── main.cu           # Main program
-│   ├── feature_extraction.cu  # CUDA feature extraction
-│   ├── knn.cu            # CUDA KNN implementation
-│   └── cuda_visualize_performance.py  # Performance visualization
-└── split_data/           # Dataset directory
-    ├── screenshots_256x256/
+├── CMakeLists.txt           # Main build configuration
+├── build.sh                 # Convenience build script
+├── include/                 # Shared header files
+│   ├── common.h            # Common definitions
+│   ├── cuda_utils.cuh      # CUDA utilities
+│   └── stb_image.h         # Image loading library
+├── sequential/             # Sequential CPU implementation
+│   ├── CMakeLists.txt      # Sequential build config
+│   ├── Makefile           # Standalone Makefile for sequential
+│   ├── training.c          # Training on CPU
+│   └── predict.c           # Prediction on CPU
+├── parallel/               # Parallel CUDA implementation
+│   ├── CMakeLists.txt      # CUDA build config
+│   ├── training.cu         # Training on GPU
+│   ├── predict.cu          # Prediction on GPU
+│   ├── feature_extraction.cu # Feature extraction kernels
+│   └── knn.cu              # KNN classification kernels
+└── data/                   # Dataset directory
+    ├── screenshots/
     │   ├── train/
     │   └── test/
-    └── non_screenshot_256x256/
+    └── non_screenshots/
         ├── train/
         └── test/
 ```
 
-## Setup Instructions
+## Build Instructions
 
-1. **Clone and Prepare Environment**:
-   ```bash
-   # Clone repository
-   git clone [repository-url]
-   cd screenshot-classification
+### Option 1: Using the Convenience Build Script
 
-   # Create necessary directories
-   mkdir -p include src lib build
-   mkdir -p split_data/{screenshots_256x256,non_screenshot_256x256}/{train,test}
+The easiest way to build the project is using the provided build script:
 
-   # Download stb_image.h
-   wget -O include/stb_image.h https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
-   ```
+```bash
+# Build in sequential mode (C only, no CUDA required)
+./build.sh --mode=sequential
 
-2. **Prepare Dataset**:
-   - Place screenshot images in `split_data/screenshots_256x256/{train,test}`
-   - Place non-screenshot images in `split_data/non_screenshot_256x256/{train,test}`
-   - All images should be 256x256 pixels in RGB format
+# Build in parallel mode (CUDA)
+./build.sh --mode=parallel
+```
 
-3. **Build the Project**:
-   ```bash
-   cd build
-   cmake ..
-   make -j4
-   ```
+### Option 2: Build Only Sequential Implementation (No CUDA Required)
+
+This option is perfect for systems without CUDA, like macOS or systems without NVIDIA GPUs.
+
+```bash
+# Method 1: Using the standalone Makefile in the sequential directory
+cd sequential
+make
+
+# Method 2: Using CMake with sequential mode flag
+mkdir build && cd build
+cmake -DBUILD_MODE=sequential ..
+make
+```
+
+### Option 3: Build Only CUDA Implementation
+
+This requires a working CUDA installation:
+
+```bash
+mkdir build && cd build
+cmake -DBUILD_MODE=parallel ..
+make
+```
+
+By default, if no mode is specified, the system will build in sequential mode.
+
+## Dataset Preparation
+
+Place your images in the following directories:
+   - Screenshots: `data/screenshots/{train,test}`
+   - Non-screenshots: `data/non_screenshots/{train,test}`
 
 ## Running the Code
 
-1. **Training and Classification**:
-   ```bash
-   ./train_cuda [optional: output_model_path]
-   ```
-   Default model path is `trained_model.bin`
+### Sequential Implementation:
 
-2. **Monitor GPU Performance**:
-   ```bash
-   # In another terminal
-   watch -n 0.5 nvidia-smi
-   ```
+```bash
+# Using the standalone build
+cd sequential
+./train_seq [output_model_path]
+./predict_seq [model_path] [image_path]
 
-3. **Visualize Performance**:
-   ```bash
-   # After running the training
-   python3 src/cuda_visualize_performance.py
-   ```
-   This will generate three plots:
-   - Time distribution pie chart
-   - Processing time bar chart
-   - Additional metrics visualization
+# Using the CMake build
+./bin/train_seq [output_model_path]
+./bin/predict_seq [model_path] [image_path]
+```
 
-## Performance Monitoring
+### CUDA Implementation (if built):
 
-The code provides detailed performance metrics:
-- Data loading time
-- Feature extraction time
-- KNN classification time
-- GPU memory usage
-- Processing speed (images/second)
-- Classification accuracy
+```bash
+./bin/train_cuda [output_model_path]
+./bin/predict_cuda [model_path] [image_path]
+```
 
-## Recent Changes and Improvements
+## Performance Comparison
 
-1. **CUDA Optimizations**:
+| Metric                  | CPU Sequential  | CUDA Parallel  | Improvement |
+|-------------------------|-----------------|----------------|-------------|
+| Total Processing Time   | ~126.69 seconds | ~3.26 seconds  | ~39x faster |
+| Feature Extraction Time | ~3.05 seconds   | ~0.08 seconds  | ~38x faster |
+| KNN Computation Time    | ~0.21 seconds   | ~0.006 seconds | ~35x faster |
+| Processing Speed        | ~255.84 img/s   | ~9950 img/s    | ~39x faster |
+| Classification Accuracy | ~62.81%         | ~62.81%        | Same        |
+
+## Project Features
+
+1. **Enhanced Feature Extraction**:
+   - Grayscale histograms
+   - Edge detection histograms
+   - Region-specific features (status bar, navigation bar)
+   - Statistical UI pattern analysis
+
+2. **CUDA Optimizations**:
+   - Shared memory for histogram computation
    - Batch processing for efficient GPU utilization
-   - Shared memory usage for histogram computation
-   - Parallel KNN implementation
+   - Parallel KNN implementation with reduction
    - Optimized memory transfers
 
-2. **Performance Monitoring**:
+3. **Performance Monitoring**:
    - Detailed timing for each phase
    - GPU memory usage tracking
-   - Real-time progress indicators
    - Accuracy measurements
-
-3. **Visualization Tools**:
-   - Added Python script for performance visualization
-   - Multiple chart types for different metrics
-   - Easy-to-understand performance breakdown
-
-4. **Code Structure**:
-   - Modular CUDA implementation
-   - Separated feature extraction and KNN logic
-   - Improved error handling
-   - Better memory management
 
 ## Troubleshooting
 
-1. **Memory Issues**:
+1. **Missing CUDA error**: 
+   - If you don't have CUDA installed, use the sequential-only build
+   - Use `./build.sh --mode=sequential` or run `make` directly in the sequential directory
+
+2. **Memory Issues**:
    - Reduce `MAX_BATCH_SIZE` in `include/common.h`
-   - Monitor GPU memory usage with `nvidia-smi`
-   - Close other GPU-intensive applications
+   - For CUDA builds, monitor GPU memory usage with `nvidia-smi`
 
-2. **Performance Issues**:
-   - Ensure proper cooling for the Jetson
-   - Monitor thermal throttling:
-     ```bash
-     watch -n 0.5 cat /sys/devices/virtual/thermal/thermal_zone*/temp
-     ```
+3. **Performance Issues**:
+   - For CUDA builds, ensure your GPU drivers are up to date
+   - Adjust `THREADS_PER_BLOCK` in `include/common.h`
 
-3. **Build Issues**:
-   - Verify CUDA installation:
+4. **Build Issues**:
+   - If your CMake version is too old, update it or use the standalone Makefile
+   - For CUDA builds, verify your CUDA installation:
      ```bash
      nvcc --version
-     ```
-   - Check CMake version:
-     ```bash
-     cmake --version
-     ```
-
-## Hardware Specifications
-
-Tested on NVIDIA Jetson Orin Nano:
-- Device Name: Orin
-- Compute Capability: 8.7
-- Total Global Memory: 7.44 GB
-- Shared Memory per Block: 48 KB
-- L2 Cache Size: 2048 KB
-- Memory Clock Rate: 1.02 GHz
-- Memory Bus Width: 128 bits
-- Max Threads per Block: 1024
-- Max Threads per MultiProcessor: 1536
-
-## Dataset Statistics
-
-- Training Set:
-  - Screenshots: 9,600 images
-  - Non-Screenshots: 25,932 images
-  - Total: 35,532 images
-
-- Test Set:
-  - Screenshots: 2,399 images
-  - Non-Screenshots: 6,481 images
-  - Total: 8,880 images
-
-## Performance Results
-
-| Metric                    | Value          |
-|--------------------------|----------------|
-| Total Processing Time    | 126.69 seconds |
-| Data Loading Time        | 125.16 seconds |
-| Feature Extraction Time  | 3.05 seconds   |
-| KNN Computation Time     | 0.21 seconds   |
-| Processing Speed         | 255.84 img/s   |
-| Peak GPU Memory Usage    | 4,502.64 MB    |
-| Classification Accuracy  | 62.81%         |
-
-### Phase Distribution
-- Data Loading: 98.8%
-- Feature Extraction: 2.4%
-- KNN Classification: 0.2%
-
-### Performance Analysis
-
-1. **Processing Efficiency**:
-   - The system processes over 255 images per second
-   - Total dataset of 32,413 images processed in ~127 seconds
-   - Extremely efficient KNN computation (0.21 seconds)
-
-2. **Memory Usage**:
-   - Peak memory usage is ~4.5GB
-   - Well within the Jetson's 8GB capacity
-   - Efficient memory management for large datasets
-
-3. **Bottlenecks**:
-   - Data loading dominates (98.8% of total time)
-   - GPU computation is very efficient (only 2.6% combined)
-   - Potential for I/O optimization
-
-4. **Classification Performance**:
-   - Accuracy of 62.81% on test set
-   - Room for improvement in classification accuracy
-   - Fast inference time (0.21s for KNN)
-
-### Optimization Opportunities
-
-1. **I/O Performance**:
-   - Consider data preprocessing
-   - Implement async data loading
-   - Use memory mapping for large datasets
-
-2. **GPU Utilization**:
-   - Current GPU computation is very efficient
-   - Could potentially process larger batches
-   - Room for parallel data loading
-
-3. **Memory Management**:
-   - Current usage (4.5GB) allows for larger batches
-   - Could implement memory pooling
-   - Potential for streaming larger datasets
-
-## Contributing
-
-Feel free to submit issues and enhancement requests. To contribute:
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request 
+     ``` 
