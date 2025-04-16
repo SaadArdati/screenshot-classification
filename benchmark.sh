@@ -7,7 +7,7 @@ MODEL_FILE="model_${MODE}.bin"
 # Function to run training and capture time
 run_training() {
     echo "Training $MODE model..."
-    echo "Running command: ./build/bin/train_seq $MODEL_FILE"
+    echo "Running command: ./build/bin/$TRAIN_BIN $MODEL_FILE"
     
     # Direct debugging output
     echo "DEBUGGING: Listing executable"
@@ -15,16 +15,20 @@ run_training() {
     
     # Run with verbose output
     if [ "$MODE" == "sequential" ]; then
-        ./build/bin/train_seq $MODEL_FILE | tee train_${MODE}_output.txt
+        TRAIN_BIN="train_seq"
+        ./build/bin/$TRAIN_BIN $MODEL_FILE | tee train_${MODE}_output.txt
         RET=${PIPESTATUS[0]}
         if [ $RET -ne 0 ]; then
             echo "ERROR: Training executable failed with code $RET"
+            exit $RET
         fi
     else
-        ./build/bin/train_cuda $MODEL_FILE | tee train_${MODE}_output.txt
+        TRAIN_BIN="train_cuda"
+        ./build/bin/$TRAIN_BIN $MODEL_FILE | tee train_${MODE}_output.txt
         RET=${PIPESTATUS[0]}
         if [ $RET -ne 0 ]; then
             echo "ERROR: Training executable failed with code $RET"
+            exit $RET
         fi
     fi
     
@@ -42,12 +46,18 @@ run_training() {
     if grep -q "Total Processing Time" train_${MODE}_output.txt; then
         grep "Total Processing Time" train_${MODE}_output.txt | awk '{print $4}' > train_${MODE}_total_time.txt
         echo "Found total time: $(cat train_${MODE}_total_time.txt)"
+    elif grep -q "Total Processing Time:" train_${MODE}_output.txt; then
+        grep "Total Processing Time:" train_${MODE}_output.txt | awk '{print $4}' > train_${MODE}_total_time.txt
+        echo "Found total time: $(cat train_${MODE}_total_time.txt)"
     else
         echo "WARNING: Could not find 'Total Processing Time' in output"
     fi
     
     if grep -q "Data Loading Time" train_${MODE}_output.txt; then
         grep "Data Loading Time" train_${MODE}_output.txt | awk '{print $4}' > train_${MODE}_loading_time.txt
+        echo "Found loading time: $(cat train_${MODE}_loading_time.txt)"
+    elif grep -q "Data Loading Time:" train_${MODE}_output.txt; then
+        grep "Data Loading Time:" train_${MODE}_output.txt | awk '{print $4}' > train_${MODE}_loading_time.txt
         echo "Found loading time: $(cat train_${MODE}_loading_time.txt)"
     else
         echo "WARNING: Could not find 'Data Loading Time' in output"
@@ -56,20 +66,38 @@ run_training() {
     if grep -q "Memory Usage" train_${MODE}_output.txt; then
         grep "Memory Usage" train_${MODE}_output.txt | awk '{print $3}' > train_${MODE}_memory.txt
         echo "Found memory usage: $(cat train_${MODE}_memory.txt)"
+    elif grep -q "Memory Usage:" train_${MODE}_output.txt; then
+        grep "Memory Usage:" train_${MODE}_output.txt | awk '{print $3}' > train_${MODE}_memory.txt
+        echo "Found memory usage: $(cat train_${MODE}_memory.txt)"
+    elif grep -q "Peak GPU Memory Usage" train_${MODE}_output.txt; then
+        grep "Peak GPU Memory Usage" train_${MODE}_output.txt | awk '{print $5}' > train_${MODE}_memory.txt
+        echo "Found memory usage: $(cat train_${MODE}_memory.txt)"
     else
-        echo "WARNING: Could not find 'Memory Usage' in output"
+        echo "WARNING: Could not find memory usage in output"
     fi
     
-    if grep -q "Accuracy" train_${MODE}_output.txt; then
-        grep "Accuracy" train_${MODE}_output.txt | awk '{print $2}' > train_${MODE}_accuracy.txt
-        echo "Found accuracy: $(cat train_${MODE}_accuracy.txt)"
+    if grep -q "Classification Accuracy" train_${MODE}_output.txt; then
+        grep "Classification Accuracy" train_${MODE}_output.txt | awk '{print $3}' | sed 's/%//' > train_${MODE}_accuracy.txt
+        echo "Found accuracy: $(cat train_${MODE}_accuracy.txt)%"
+    elif grep -q "Model accuracy on test set" train_${MODE}_output.txt; then
+        grep "Model accuracy on test set" train_${MODE}_output.txt | awk '{print $6}' | sed 's/%//' > train_${MODE}_accuracy.txt
+        echo "Found accuracy: $(cat train_${MODE}_accuracy.txt)%"
     else
-        echo "WARNING: Could not find 'Accuracy' in output"
+        echo "WARNING: Could not find accuracy in output"
     fi
     
     # Calculate processing speed only if we have the necessary data
-    if grep -q "Number of training examples" train_${MODE}_output.txt && [ -s train_${MODE}_total_time.txt ]; then
-        TOTAL_EXAMPLES=$(grep "Number of training examples" train_${MODE}_output.txt | awk '{print $5}')
+    if grep -q "Number of Training Examples" train_${MODE}_output.txt && [ -s train_${MODE}_total_time.txt ]; then
+        TOTAL_EXAMPLES=$(grep "Number of Training Examples" train_${MODE}_output.txt | awk '{print $5}')
+        TOTAL_TIME=$(cat train_${MODE}_total_time.txt)
+        if [ ! -z "$TOTAL_EXAMPLES" ] && [ ! -z "$TOTAL_TIME" ] && [ "$TOTAL_TIME" != "0.0" ]; then
+            echo "scale=2; $TOTAL_EXAMPLES / $TOTAL_TIME" | bc > train_${MODE}_images_per_sec.txt
+            echo "Calculated images per second: $(cat train_${MODE}_images_per_sec.txt)"
+        else
+            echo "WARNING: Could not calculate images per second (examples: $TOTAL_EXAMPLES, time: $TOTAL_TIME)"
+        fi
+    elif grep -q "Total Images Processed" train_${MODE}_output.txt && [ -s train_${MODE}_total_time.txt ]; then
+        TOTAL_EXAMPLES=$(grep "Total Images Processed" train_${MODE}_output.txt | awk '{print $4}')
         TOTAL_TIME=$(cat train_${MODE}_total_time.txt)
         if [ ! -z "$TOTAL_EXAMPLES" ] && [ ! -z "$TOTAL_TIME" ] && [ "$TOTAL_TIME" != "0.0" ]; then
             echo "scale=2; $TOTAL_EXAMPLES / $TOTAL_TIME" | bc > train_${MODE}_images_per_sec.txt
@@ -95,11 +123,36 @@ run_prediction() {
     rm -f predict_${MODE}_memory.txt
     
     # Get sample images for testing
-    SCREENSHOT_IMG=$(find data/screenshots/test -type f | head -n 1)
-    NON_SCREENSHOT_IMG=$(find data/non_screenshots/test -type f | head -n 1)
+    SCREENSHOT_IMG=""
+    NON_SCREENSHOT_IMG=""
+    
+    # First try split_data directory (new structure)
+    if [ -d "split_data/screenshots_256x256/test" ]; then
+        SCREENSHOT_IMG=$(find split_data/screenshots_256x256/test -type f | head -n 1)
+    fi
+    
+    if [ -d "split_data/non_screenshot_256x256/test" ]; then
+        NON_SCREENSHOT_IMG=$(find split_data/non_screenshot_256x256/test -type f | head -n 1)
+    fi
+    
+    # If not found, try data directory (old structure)
+    if [ -z "$SCREENSHOT_IMG" ] && [ -d "data/screenshots/test" ]; then
+        SCREENSHOT_IMG=$(find data/screenshots/test -type f | head -n 1)
+    fi
+    
+    if [ -z "$NON_SCREENSHOT_IMG" ] && [ -d "data/non_screenshots/test" ]; then
+        NON_SCREENSHOT_IMG=$(find data/non_screenshots/test -type f | head -n 1)
+    fi
+    
+    if [ -z "$SCREENSHOT_IMG" ]; then
+        echo "ERROR: No screenshot test image found. Skipping prediction tests."
+        return 1
+    fi
     
     echo "Using screenshot test image: $SCREENSHOT_IMG"
-    echo "Using non-screenshot test image: $NON_SCREENSHOT_IMG"
+    if [ ! -z "$NON_SCREENSHOT_IMG" ]; then
+        echo "Using non-screenshot test image: $NON_SCREENSHOT_IMG"
+    fi
     
     # Direct debugging output
     echo "DEBUGGING: Listing executable"
@@ -111,16 +164,18 @@ run_prediction() {
         echo "Running iteration $i..."
         
         if [ "$MODE" == "sequential" ]; then
-            echo "COMMAND: ./build/bin/predict_seq $MODEL_FILE \"$SCREENSHOT_IMG\""
-            ./build/bin/predict_seq $MODEL_FILE "$SCREENSHOT_IMG" | tee predict_${MODE}_output_$i.txt
+            PREDICT_BIN="predict_seq"
+            echo "COMMAND: ./build/bin/$PREDICT_BIN $MODEL_FILE \"$SCREENSHOT_IMG\""
+            ./build/bin/$PREDICT_BIN $MODEL_FILE "$SCREENSHOT_IMG" | tee predict_${MODE}_output_$i.txt
             RET=${PIPESTATUS[0]}
             if [ $RET -ne 0 ]; then
                 echo "ERROR: Prediction executable failed with code $RET"
                 continue
             fi
         else
-            echo "COMMAND: ./build/bin/predict_cuda $MODEL_FILE \"$SCREENSHOT_IMG\""
-            ./build/bin/predict_cuda $MODEL_FILE "$SCREENSHOT_IMG" | tee predict_${MODE}_output_$i.txt
+            PREDICT_BIN="predict_cuda"
+            echo "COMMAND: ./build/bin/$PREDICT_BIN $MODEL_FILE \"$SCREENSHOT_IMG\""
+            ./build/bin/$PREDICT_BIN $MODEL_FILE "$SCREENSHOT_IMG" | tee predict_${MODE}_output_$i.txt
             RET=${PIPESTATUS[0]}
             if [ $RET -ne 0 ]; then
                 echo "ERROR: Prediction executable failed with code $RET"
@@ -139,6 +194,10 @@ run_prediction() {
             grep "Total Processing Time" predict_${MODE}_output_$i.txt | awk '{print $4}' > predict_${MODE}_total_time.txt.tmp
             echo "Found total time: $(cat predict_${MODE}_total_time.txt.tmp)"
             cat predict_${MODE}_total_time.txt.tmp >> predict_${MODE}_total_time.txt
+        elif grep -q "Total Processing Time:" predict_${MODE}_output_$i.txt; then
+            grep "Total Processing Time:" predict_${MODE}_output_$i.txt | awk '{print $4}' > predict_${MODE}_total_time.txt.tmp
+            echo "Found total time: $(cat predict_${MODE}_total_time.txt.tmp)"
+            cat predict_${MODE}_total_time.txt.tmp >> predict_${MODE}_total_time.txt
         else
             echo "WARNING: Could not find 'Total Processing Time' in output"
             echo "0.0" >> predict_${MODE}_total_time.txt
@@ -146,6 +205,10 @@ run_prediction() {
         
         if grep -q "Feature Extraction Time" predict_${MODE}_output_$i.txt; then
             grep "Feature Extraction Time" predict_${MODE}_output_$i.txt | awk '{print $4}' > predict_${MODE}_feature_time.txt.tmp
+            echo "Found feature time: $(cat predict_${MODE}_feature_time.txt.tmp)"
+            cat predict_${MODE}_feature_time.txt.tmp >> predict_${MODE}_feature_time.txt
+        elif grep -q "Feature Extraction Time:" predict_${MODE}_output_$i.txt; then
+            grep "Feature Extraction Time:" predict_${MODE}_output_$i.txt | awk '{print $4}' > predict_${MODE}_feature_time.txt.tmp
             echo "Found feature time: $(cat predict_${MODE}_feature_time.txt.tmp)"
             cat predict_${MODE}_feature_time.txt.tmp >> predict_${MODE}_feature_time.txt
         else
@@ -157,6 +220,10 @@ run_prediction() {
             grep "Classification Time" predict_${MODE}_output_$i.txt | awk '{print $3}' > predict_${MODE}_knn_time.txt.tmp
             echo "Found KNN time: $(cat predict_${MODE}_knn_time.txt.tmp)"
             cat predict_${MODE}_knn_time.txt.tmp >> predict_${MODE}_knn_time.txt
+        elif grep -q "Classification Time:" predict_${MODE}_output_$i.txt; then
+            grep "Classification Time:" predict_${MODE}_output_$i.txt | awk '{print $3}' > predict_${MODE}_knn_time.txt.tmp
+            echo "Found KNN time: $(cat predict_${MODE}_knn_time.txt.tmp)"
+            cat predict_${MODE}_knn_time.txt.tmp >> predict_${MODE}_knn_time.txt
         else
             echo "WARNING: Could not find 'Classification Time' in output"
             echo "0.0" >> predict_${MODE}_knn_time.txt
@@ -164,6 +231,14 @@ run_prediction() {
         
         if grep -q "Memory Usage" predict_${MODE}_output_$i.txt; then
             grep "Memory Usage" predict_${MODE}_output_$i.txt | awk '{print $3}' > predict_${MODE}_memory.txt.tmp
+            echo "Found memory usage: $(cat predict_${MODE}_memory.txt.tmp)"
+            cat predict_${MODE}_memory.txt.tmp >> predict_${MODE}_memory.txt
+        elif grep -q "Memory Usage:" predict_${MODE}_output_$i.txt; then
+            grep "Memory Usage:" predict_${MODE}_output_$i.txt | awk '{print $3}' > predict_${MODE}_memory.txt.tmp
+            echo "Found memory usage: $(cat predict_${MODE}_memory.txt.tmp)"
+            cat predict_${MODE}_memory.txt.tmp >> predict_${MODE}_memory.txt
+        elif grep -q "Peak GPU Memory Usage" predict_${MODE}_output_$i.txt; then
+            grep "Peak GPU Memory Usage" predict_${MODE}_output_$i.txt | awk '{print $5}' > predict_${MODE}_memory.txt.tmp
             echo "Found memory usage: $(cat predict_${MODE}_memory.txt.tmp)"
             cat predict_${MODE}_memory.txt.tmp >> predict_${MODE}_memory.txt
         else
