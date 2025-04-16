@@ -39,19 +39,19 @@ def check_cuda():
     try:
         stdout, stderr, code = run_cmd("nvcc --version", capture_output=True)
         if code != 0:
-            print("CUDA compiler (nvcc) not found. Only sequential implementation will be built.")
-            return False
+            print("CUDA compiler (nvcc) not found. Exiting.")
+            sys.exit(1)
             
         stdout, stderr, code = run_cmd("nvidia-smi", capture_output=True)
         if code != 0:
-            print("NVIDIA GPU not accessible. Only sequential implementation will be built.")
-            return False
+            print("NVIDIA GPU not accessible. Exiting.")
+            sys.exit(1)
             
         return True
     except Exception as e:
         print(f"Error checking CUDA: {e}")
-        print("Only sequential implementation will be built.")
-        return False
+        print("Exiting.")
+        sys.exit(1)
 
 def setup_kaggle():
     """Setup Kaggle API and credentials"""
@@ -488,34 +488,10 @@ def generate_visualizations(metrics):
     """Generate visualization plots based on the gathered metrics"""
     print("\nGenerating visualization plots...")
     
-    # Check for real data or use demonstration data if metrics are empty
+    # Check if we have real benchmark data
     if metrics['sequential']['train_time'] <= 0.0001 and metrics['parallel']['train_time'] <= 0.0001:
-        print("No real benchmark data collected, using demonstration data...")
-        # Use demonstration data for visualization
-        metrics = {
-            'sequential': {
-                'train_time': 27.93,
-                'loading_time': 21.22,
-                'train_memory': 9.04,
-                'accuracy': 94.06,
-                'images_per_sec': 928.46,
-                'predict_time': 0.08514,
-                'feature_time': 0.08339,
-                'knn_time': 0.00175,
-                'predict_memory': 6.43
-            },
-            'parallel': {
-                'train_time': 5.78,
-                'loading_time': 4.96,
-                'train_memory': 12.37,
-                'accuracy': 94.06,
-                'images_per_sec': 4415.22,
-                'predict_time': 0.01723,
-                'feature_time': 0.01573,
-                'knn_time': 0.00150,
-                'predict_memory': 8.75
-            }
-        }
+        print("No real benchmark data collected. Exiting.")
+        sys.exit(1)
     
     # Calculate speedups
     seq_train_total_time = metrics['sequential']['train_time']
@@ -694,9 +670,19 @@ def build_and_benchmark(has_cuda):
     print("Building sequential implementation...")
     run_cmd("./build.sh --mode=sequential")
     
+    # Check if sequential build succeeded
+    if not os.path.exists("build/bin/train_seq") or not os.path.exists("build/bin/predict_seq"):
+        print("Error: Sequential build failed. Executables not found. Exiting.")
+        sys.exit(1)
+    
     if has_cuda:
         print("Building CUDA implementation...")
         run_cmd("./build.sh --mode=parallel")
+        
+        # Check if CUDA build succeeded
+        if not os.path.exists("build/bin/train_cuda") or not os.path.exists("build/bin/predict_cuda"):
+            print("Error: CUDA build failed. Executables not found. Exiting.")
+            sys.exit(1)
     
     # Run direct benchmarking
     direct_benchmark()
