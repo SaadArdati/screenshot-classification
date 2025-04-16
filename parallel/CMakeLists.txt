@@ -81,7 +81,11 @@ install(TARGETS train_cuda predict_cuda cuda_components
 
 # Set CUDA specific flags
 set_target_properties(train_cuda PROPERTIES
-    CUDA_FLAGS "-G"
+    CUDA_FLAGS "-G --ptxas-options=-v --gpu-code=sm_75 --gpu-architecture=sm_75"
+)
+
+set_target_properties(predict_cuda PROPERTIES
+    CUDA_FLAGS "-G --ptxas-options=-v --gpu-code=sm_75 --gpu-architecture=sm_75 --forward-unknown-to-host-compiler"
 )
 
 # Print platform-specific information
