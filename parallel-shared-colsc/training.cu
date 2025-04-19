@@ -387,8 +387,8 @@ int main(int argc, char** argv) {
     // Allocate pinned memory for features to improve data transfer performance
     Feature* trainFeatures;
     Feature* testFeatures;
-    CUDA_CHECK(cudaMallocHost(&trainFeatures, MAX_IMG_COUNT * sizeof(Feature)));
-    CUDA_CHECK(cudaMallocHost(&testFeatures, MAX_IMG_COUNT * sizeof(Feature)));
+    CUDA_CHECK(cudaMallocHost(&trainFeatures, MAX_IMAGES * sizeof(Feature)));
+    CUDA_CHECK(cudaMallocHost(&testFeatures, MAX_IMAGES * sizeof(Feature)));
     
     if (!trainFeatures || !testFeatures) {
         fprintf(stderr, "Failed to allocate memory for features\n");
@@ -400,16 +400,16 @@ int main(int argc, char** argv) {
     // Load training data
     int trainCount = 0;
     start_time = clock();
-    loadImagesFromDirOptimizedGPU(screenshots_train_dir, 1, trainFeatures, &trainCount, MAX_IMG_COUNT);
-    loadImagesFromDirOptimizedGPU(non_screenshots_train_dir, 0, trainFeatures, &trainCount, MAX_IMG_COUNT);
+    loadImagesFromDirOptimizedGPU(screenshots_train_dir, 1, trainFeatures, &trainCount, MAX_IMAGES);
+    loadImagesFromDirOptimizedGPU(non_screenshots_train_dir, 0, trainFeatures, &trainCount, MAX_IMAGES);
     end_time = clock();
     load_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
     
     // Load test data
     int testCount = 0;
     start_time = clock();
-    loadImagesFromDirOptimizedGPU(screenshots_test_dir, 1, testFeatures, &testCount, MAX_IMG_COUNT);
-    loadImagesFromDirOptimizedGPU(non_screenshots_test_dir, 0, testFeatures, &testCount, MAX_IMG_COUNT);
+    loadImagesFromDirOptimizedGPU(screenshots_test_dir, 1, testFeatures, &testCount, MAX_IMAGES);
+    loadImagesFromDirOptimizedGPU(non_screenshots_test_dir, 0, testFeatures, &testCount, MAX_IMAGES);
     end_time = clock();
     load_time += (double)(end_time - start_time) / CLOCKS_PER_SEC;
     
