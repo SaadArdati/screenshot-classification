@@ -5,16 +5,180 @@
 #include <cuda_runtime.h>
 #include "../include/cuda_utils.cuh"
 #include "../include/common.h"
+#include "../include/screenshot_utils.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "../include/stb_image.h"
 
 // Function declarations - these are implemented in feature_extraction.cu and knn.cu
 extern "C" void extractFeaturesGPU(const unsigned char* h_images, int batch_size,
-                                   int width, int height, int channels, 
-                                   Feature* h_features);
+                                  int width, int height, int channels, 
+                                  Feature* h_features);
 extern "C" void classifyBatchGPU(const Feature* train_features, int train_size,
-                               const Feature* query_features, int query_size,
-                               int* predictions, double* computation_times);
+                                const Feature* query_features, int query_size,
+                                int* predictions, double* computation_times);
+
+// CUDA kernel for computing screenshot statistics
+__global__ void computeScreenshotStatsKernel(
+    const unsigned char* d_img, 
+    int w, int h, int channels,
+    int* d_edge_pixels,
+    int* d_regular_edge_pixels,
+    int* d_uniform_color_pixels,
+    int* d_horizontal_edge_counts) {
+    
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    if (x >= w-1 || y >= h-1 || x < 1 || y < 1)
+        return;
+    
+    const int idx = (y * w + x) * channels;
+    
+    // Get grayscale of current and neighboring pixels
+    const unsigned char gray = (d_img[idx] + d_img[idx+1] + d_img[idx+2]) / 3;
+    const unsigned char gray_left = (d_img[(y * w + (x-1)) * channels] + 
+                                  d_img[(y * w + (x-1)) * channels + 1] + 
+                                  d_img[(y * w + (x-1)) * channels + 2]) / 3;
+    const unsigned char gray_right = (d_img[(y * w + (x+1)) * channels] + 
+                                   d_img[(y * w + (x+1)) * channels + 1] + 
+                                   d_img[(y * w + (x+1)) * channels + 2]) / 3;
+    const unsigned char gray_up = (d_img[((y-1) * w + x) * channels] + 
+                                d_img[((y-1) * w + x) * channels + 1] + 
+                                d_img[((y-1) * w + x) * channels + 2]) / 3;
+    const unsigned char gray_down = (d_img[((y+1) * w + x) * channels] + 
+                                  d_img[((y+1) * w + x) * channels + 1] + 
+                                  d_img[((y+1) * w + x) * channels + 2]) / 3;
+    
+    // Calculate horizontal and vertical gradients
+    const int h_gradient = abs(gray_right - gray_left);
+    const int v_gradient = abs(gray_down - gray_up);
+    
+    // Detect edges
+    if (h_gradient > EDGE_THRESHOLD || v_gradient > EDGE_THRESHOLD) {
+        atomicAdd(d_edge_pixels, 1);
+        atomicAdd(&d_horizontal_edge_counts[y], 1);
+        
+        // Check for regular edges (straight lines common in UI)
+        if ((h_gradient > EDGE_THRESHOLD && v_gradient < EDGE_THRESHOLD/2) || 
+            (v_gradient > EDGE_THRESHOLD && h_gradient < EDGE_THRESHOLD/2)) {
+            atomicAdd(d_regular_edge_pixels, 1);
+        }
+    }
+    
+    // Check for uniform color regions (common in UI backgrounds/panels)
+    int local_variance = 0;
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            if (y+dy >= 0 && y+dy < h && x+dx >= 0 && x+dx < w) {
+                const int local_idx = ((y+dy) * w + (x+dx)) * channels;
+                const unsigned char local_gray = (d_img[local_idx] + d_img[local_idx+1] + d_img[local_idx+2]) / 3;
+                local_variance += abs(gray - local_gray);
+            }
+        }
+    }
+    
+    // Low local variance indicates uniform color region
+    if (local_variance < 20) {
+        atomicAdd(d_uniform_color_pixels, 1);
+    }
+}
+
+// CUDA kernel for analyzing horizontal alignments
+__global__ void analyzeGridAlignmentKernel(
+    const int* d_horizontal_edge_counts,
+    int h, int w,
+    int* d_aligned_rows) {
+    
+    int y = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    if (y >= h-3 || y < 1)
+        return;
+    
+    // Check for similar edge patterns in consecutive rows (indicates UI grid)
+    if (d_horizontal_edge_counts[y] > 0 && 
+        abs(d_horizontal_edge_counts[y] - d_horizontal_edge_counts[y+1]) < w * 0.05) {
+        atomicAdd(d_aligned_rows, 1);
+    }
+}
+
+// Compute screenshot statistics with CUDA
+ScreenshotStats computeScreenshotStatisticsGPU(unsigned char *img, int w, int h, int channels) {
+    ScreenshotStats stats = {0};
+    int total_pixels = w * h;
+    
+    // Allocate device memory
+    unsigned char* d_img;
+    int* d_edge_pixels;
+    int* d_regular_edge_pixels;
+    int* d_uniform_color_pixels;
+    int* d_horizontal_edge_counts;
+    int* d_aligned_rows;
+    
+    CUDA_CHECK(cudaMalloc(&d_img, w * h * channels * sizeof(unsigned char)));
+    CUDA_CHECK(cudaMalloc(&d_edge_pixels, sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_regular_edge_pixels, sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_uniform_color_pixels, sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_horizontal_edge_counts, h * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_aligned_rows, sizeof(int)));
+    
+    // Initialize counters to 0
+    CUDA_CHECK(cudaMemset(d_edge_pixels, 0, sizeof(int)));
+    CUDA_CHECK(cudaMemset(d_regular_edge_pixels, 0, sizeof(int)));
+    CUDA_CHECK(cudaMemset(d_uniform_color_pixels, 0, sizeof(int)));
+    CUDA_CHECK(cudaMemset(d_horizontal_edge_counts, 0, h * sizeof(int)));
+    CUDA_CHECK(cudaMemset(d_aligned_rows, 0, sizeof(int)));
+    
+    // Copy image to device
+    CUDA_CHECK(cudaMemcpy(d_img, img, w * h * channels * sizeof(unsigned char), cudaMemcpyHostToDevice));
+    
+    // Launch kernels
+    dim3 blockSize(16, 16);
+    dim3 gridSize((w + blockSize.x - 1) / blockSize.x, (h + blockSize.y - 1) / blockSize.y);
+    
+    computeScreenshotStatsKernel<<<gridSize, blockSize>>>(
+        d_img, w, h, channels,
+        d_edge_pixels, d_regular_edge_pixels, d_uniform_color_pixels,
+        d_horizontal_edge_counts
+    );
+    CUDA_CHECK_KERNEL();
+    
+    // Launch grid alignment kernel
+    int blockSizeAlign = 256;
+    int gridSizeAlign = (h + blockSizeAlign - 1) / blockSizeAlign;
+    
+    analyzeGridAlignmentKernel<<<gridSizeAlign, blockSizeAlign>>>(
+        d_horizontal_edge_counts, h, w, d_aligned_rows
+    );
+    CUDA_CHECK_KERNEL();
+    
+    // Copy results back to host
+    int edge_pixels = 0, regular_edge_pixels = 0, uniform_color_pixels = 0, aligned_rows = 0;
+    CUDA_CHECK(cudaMemcpy(&edge_pixels, d_edge_pixels, sizeof(int), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(&regular_edge_pixels, d_regular_edge_pixels, sizeof(int), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(&uniform_color_pixels, d_uniform_color_pixels, sizeof(int), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(&aligned_rows, d_aligned_rows, sizeof(int), cudaMemcpyDeviceToHost));
+    
+    // Calculate final statistics (normalized to [0,1] range)
+    float edge_density = (float)edge_pixels / total_pixels;
+    float edge_regularity = edge_pixels > 0 ? (float)regular_edge_pixels / edge_pixels : 0;
+    float grid_alignment = (float)aligned_rows / h;
+    float color_uniformity = (float)uniform_color_pixels / total_pixels;
+    
+    // Combine metrics into simplified scores
+    stats.edge_score = (edge_regularity * 0.6) + (edge_density * 0.2) + (grid_alignment * 0.2);
+    stats.color_score = color_uniformity;
+    stats.ui_element_score = edge_density * 0.5 + grid_alignment * 0.5;
+    
+    // Cleanup
+    CUDA_CHECK(cudaFree(d_img));
+    CUDA_CHECK(cudaFree(d_edge_pixels));
+    CUDA_CHECK(cudaFree(d_regular_edge_pixels));
+    CUDA_CHECK(cudaFree(d_uniform_color_pixels));
+    CUDA_CHECK(cudaFree(d_horizontal_edge_counts));
+    CUDA_CHECK(cudaFree(d_aligned_rows));
+    
+    return stats;
+}
 
 // Load model from file
 Feature* loadModel(const char* filename, int* size) {
@@ -107,17 +271,22 @@ int main(int argc, char** argv) {
     
     printf("Image loaded: %dx%d with %d channels\n", width, height, channels);
     
-    // Extract features
+    // Check with statistical analysis first
     start_time = clock();
+    ScreenshotStats stats = computeScreenshotStatisticsGPU(img, width, height, 3);
+    int statistical_detection = isLikelyScreenshot(stats);
+    
+    // Extract features
     Feature query_feature;
     extractFeaturesGPU(img, 1, width, height, 3, &query_feature);
     end_time = clock();
     feature_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
     
-    // Check for statistical detection (label=2 indicates statistical detection)
-    if (query_feature.label == 2) {
+    // If statistical detection is positive, skip kNN
+    if (statistical_detection) {
         printf("Classification result for %s: SCREENSHOT (Statistical analysis)\n", image_path);
         printf("This image was detected as a screenshot by analyzing UI patterns\n");
+        query_feature.label = 2; // Mark as detected by statistical analysis
     } else {
         // Perform kNN classification on GPU
         start_time = clock();

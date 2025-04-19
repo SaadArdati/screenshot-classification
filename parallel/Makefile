@@ -1,5 +1,5 @@
 NVCC = nvcc
-NVCC_FLAGS = -O3
+NVCC_FLAGS = -O3 -I../include
 
 # Source files
 COMMON_SOURCES = feature_extraction.cu knn.cu

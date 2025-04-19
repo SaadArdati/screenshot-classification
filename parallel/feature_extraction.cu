@@ -1,6 +1,7 @@
 #include <cuda_runtime.h>
 #include "../include/cuda_utils.cuh"
 #include "../include/common.h"
+#include "../include/screenshot_utils.h"
 
 // Atomic add operation for float values (for histogram computation)
 __device__ void atomicAdd_float(float* address, float val) {
