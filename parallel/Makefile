@@ -2,7 +2,6 @@ NVCC = nvcc
 NVCC_FLAGS = -O3 -I../include
 
 # Source files
-COMMON_SOURCES = feature_extraction.cu knn.cu
 TRAINING_MAIN = training.cu
 PREDICT_MAIN = predict.cu
 
@@ -12,10 +11,10 @@ PREDICT_EXEC = predict
 
 all: $(TRAINING_EXEC) $(PREDICT_EXEC)
 
-$(TRAINING_EXEC): $(TRAINING_MAIN) $(COMMON_SOURCES)
+$(TRAINING_EXEC): $(TRAINING_MAIN)
 	$(NVCC) $(NVCC_FLAGS) -o $@ $^
 
-$(PREDICT_EXEC): $(PREDICT_MAIN) $(COMMON_SOURCES)
+$(PREDICT_EXEC): $(PREDICT_MAIN)
 	$(NVCC) $(NVCC_FLAGS) -o $@ $^
 
 clean:
